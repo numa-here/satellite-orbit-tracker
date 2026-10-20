@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Satellite Orbit Tracker</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+
+  <div id="app">
+    <!-- 3D Globe -->
+    <div id="globe-container">
+      <div id="message-overlay">
+        <h3 id="overlay-title">Loading…</h3>
+        <p id="overlay-text">Fetching satellite data</p>
+      </div>
+    </div>
+
+    <!-- Right-side info panel -->
+    <div id="info-panel">
+      <h1><span class="logo-icon">🛰️</span> Orbit Tracker</h1>
+
+      <!-- Status bar -->
+      <div id="status-bar">
+        <div class="spinner" id="loading-spinner"></div>
+        <span id="status-text">Connecting…</span>
+        <span id="status-badge" class="badge badge-live" style="display:none">LIVE</span>
+      </div>
+
+      <!-- Satellite selector -->
+      <div class="selector-group">
+        <label for="sat-select">Satellite</label>
+        <select id="sat-select">
+          <option value="25544">ISS (ZARYA)</option>
+        </select>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="btn-row">
+        <button class="btn" id="btn-follow">📷 Follow</button>
+        <button class="btn" id="btn-about">ℹ️ About</button>
+      </div>
+
+      <!-- Position data -->
+      <div class="data-section" id="position-section">
+        <h2>Position</h2>
+        <div class="data-row">
+          <span class="label">Latitude</span>
+          <span class="value" id="val-lat">—</span>
+        </div>
+        <div class="data-row">
+          <span class="label">Longitude</span>
+          <span class="value" id="val-lon">—</span>
+        </div>
+        <div class="data-row">
+          <span class="label">Altitude
+            <span class="info-icon" data-tip="Height above sea level in kilometers.">i</span>
+          </span>
+          <span class="value" id="val-alt">—</span>
+        </div>
+        <div class="data-row">
+          <span class="label">Speed
+            <span class="info-icon" data-tip="Orbital velocity in km/s. The ISS travels at about 7.66 km/s.">i</span>
+          </span>
+          <span class="value" id="val-speed">—</span>
+        </div>
+        <div class="data-row">
+          <span class="label">Direction</span>
+          <span class="value" id="val-direction">—</span>
+        </div>
+        <div class="data-row">
+          <span class="label">UTC Time</span>
+          <span class="value" id="val-time">—</span>
+        </div>
+      </div>
+
+      <!-- TLE info -->
+      <div class="data-section" id="tle-section">
+        <h2>TLE Info</h2>
+        <div class="data-row">
+          <span class="label">NORAD ID
+            <span class="info-icon" data-tip="Unique catalog number assigned to every tracked object in Earth orbit.">i</span>
+          </span>
+          <span class="value" id="val-norad">—</span>
+        </div>
+        <div class="data-row">
+          <span class="label">TLE Epoch
+            <span class="info-icon" data-tip="The reference time when the orbital elements were measured. Predictions are most accurate near this time.">i</span>
+          </span>
+          <span class="value" id="val-epoch">—</span>
+        </div>
+        <div class="data-row">
+          <span class="label">TLE Age</span>
+          <span class="value" id="val-age">—</span>
+        </div>
+      </div>
+
+      <!-- Orbital elements -->
+      <div class="data-section" id="elements-section">
+        <h2>Orbital Elements</h2>
+        <div class="data-row">
+          <span class="label">Inclination
+            <span class="info-icon" data-tip="Tilt of the orbit relative to Earth's equator in degrees. The ISS has an inclination of about 51.6°.">i</span>
+          </span>
+          <span class="value" id="val-inc">—</span>
+        </div>
+        <div class="data-row">
+          <span class="label">Eccentricity
+            <span class="info-icon" data-tip="Shape of the orbit. 0 = perfect circle, close to 1 = very elongated ellipse. Most LEO satellites are near 0.">i</span>
+          </span>
+          <span class="value" id="val-ecc">—</span>
+        </div>
+        <div class="data-row">
+          <span class="label">RAAN
+            <span class="info-icon" data-tip="Right Ascension of the Ascending Node – the angle from the vernal equinox to where the orbit crosses the equator going north.">i</span>
+          </span>
+          <span class="value" id="val-raan">—</span>
+        </div>
+        <div class="data-row">
+          <span class="label">Arg. of Perigee
+            <span class="info-icon" data-tip="Argument of Perigee – the angle from the ascending node to the orbit's closest point to Earth.">i</span>
+          </span>
+          <span class="value" id="val-argp">—</span>
+        </div>
+        <div class="data-row">
+          <span class="label">Mean Anomaly
+            <span class="info-icon" data-tip="Where the satellite was in its orbit at the TLE epoch, measured as an angle from perigee.">i</span>
+          </span>
+          <span class="value" id="val-ma">—</span>
+        </div>
+        <div class="data-row">
+          <span class="label">Mean Motion
+            <span class="info-icon" data-tip="Number of complete orbits the satellite makes per day. The ISS does about 15.5 orbits/day.">i</span>
+          </span>
+          <span class="value" id="val-mm">—</span>
+        </div>
+        <div class="data-row">
+          <span class="label">Period
+            <span class="info-icon" data-tip="Time for one complete orbit in minutes. Calculated as 1440 / mean motion.">i</span>
+          </span>
+          <span class="value" id="val-period">—</span>
+        </div>
+        <div class="data-row">
+          <span class="label">B*
+            <span class="info-icon" data-tip="Drag term (B-star) – models atmospheric drag on the satellite. Higher values mean more drag.">i</span>
+          </span>
+          <span class="value" id="val-bstar">—</span>
+        </div>
+      </div>
+
+      <!-- Altitude chart -->
+      <div id="altitude-chart-container">
+        <h2>Altitude vs Time</h2>
+        <canvas id="altitude-chart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- About modal -->
+  <div id="about-modal">
+    <div id="about-content">
+      <button id="about-close">&times;</button>
+      <h2>About Satellite Orbit Tracker</h2>
+      <p>This app tracks satellites in real-time using publicly available orbital data.</p>
+
+      <h3>What is a TLE?</h3>
+      <p>A Two-Line Element set (TLE) is a standardized format for describing a satellite's orbit. It contains numbers like inclination, eccentricity, and mean motion that together define the shape, orientation, and timing of the orbit. TLEs are published by organisations like CelesTrak and updated regularly.</p>
+
+      <h3>What is SGP4?</h3>
+      <p>SGP4 (Simplified General Perturbations 4) is the mathematical model used to predict where a satellite will be at any given time, based on its TLE. It accounts for Earth's oblateness, atmospheric drag, and gravitational effects from the Sun and Moon. This app uses Skyfield, which implements SGP4 internally.</p>
+
+      <h3>What is the ISS?</h3>
+      <p>The International Space Station (ISS) is a modular space station in low Earth orbit (~420 km altitude). It orbits Earth roughly every 92 minutes at about 7.66 km/s. It has been continuously occupied since November 2000 and is a collaboration between NASA, Roscosmos, JAXA, ESA, and CSA.</p>
+
+      <h3>How This App Works</h3>
+      <p>1. Fetch the latest TLE from CelesTrak<br>
+         2. Feed it to Skyfield's SGP4 propagator<br>
+         3. Get latitude, longitude, altitude at any time<br>
+         4. Display on a 3D globe with globe.gl</p>
+
+      <h3>Accuracy</h3>
+      <p>TLE-based predictions are most accurate within a few days of the TLE epoch. After 1–2 weeks, positional error can grow to tens of kilometers. For precise tracking, fresh TLEs should be used.</p>
+    </div>
+  </div>
+
+  <!-- Libraries from CDN -->
+  <script src="https://unpkg.com/globe.gl@2.35.1/dist/globe.gl.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <!-- App scripts (order matters) -->
+  <script src="/js/api.js"></script>
+  <script src="/js/globe.js"></script>
+  <script src="/js/panel.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

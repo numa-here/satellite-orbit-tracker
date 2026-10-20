@@ -1,0 +1,404 @@
+/* =========================================================================
+   Satellite Orbit Tracker – Dark space-themed UI
+   ========================================================================= */
+
+/* --- Reset & base ------------------------------------------------------- */
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg:           #0b0d17;
+  --panel-bg:     #12152280;
+  --panel-border: #1e2a3a;
+  --accent:       #00d4ff;
+  --accent-dim:   #007a99;
+  --text:         #e0e6ed;
+  --text-dim:     #8892a0;
+  --danger:       #ff4d4d;
+  --warning:      #ffb347;
+  --font-mono:    'Courier New', Courier, monospace;
+  --font-sans:    'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+html, body {
+  height: 100%;
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+}
+
+/* --- Layout ------------------------------------------------------------- */
+#app {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* Globe container fills the remaining space */
+#globe-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+/* --- Info panel (right side) -------------------------------------------- */
+#info-panel {
+  width: 360px;
+  min-width: 300px;
+  background: var(--panel-bg);
+  backdrop-filter: blur(12px);
+  border-left: 1px solid var(--panel-border);
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  z-index: 10;
+}
+
+#info-panel h1 {
+  font-size: 1.1rem;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#info-panel h1 .logo-icon {
+  font-size: 1.4rem;
+}
+
+/* Satellite selector */
+.selector-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.selector-group label {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+#sat-select {
+  background: #1a1e2e;
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 0.9rem;
+  outline: none;
+  cursor: pointer;
+}
+
+#sat-select:hover {
+  border-color: var(--accent-dim);
+}
+
+#sat-select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.15);
+}
+
+/* Data sections */
+.data-section {
+  border-top: 1px solid var(--panel-border);
+  padding-top: 12px;
+}
+
+.data-section h2 {
+  font-size: 0.75rem;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  margin-bottom: 10px;
+}
+
+/* Key-value rows */
+.data-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  font-size: 0.85rem;
+}
+
+.data-row .label {
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.data-row .value {
+  font-family: var(--font-mono);
+  color: var(--text);
+  text-align: right;
+}
+
+/* Tooltip info icon */
+.info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--panel-border);
+  color: var(--text-dim);
+  font-size: 0.6rem;
+  cursor: help;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.info-icon:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 24px;
+  top: -4px;
+  background: #1a1e2e;
+  color: var(--text);
+  border: 1px solid var(--panel-border);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-family: var(--font-sans);
+  white-space: normal;
+  width: 220px;
+  z-index: 100;
+  box-shadow: 0 4px 16px rgba(0,0,0,.5);
+  line-height: 1.4;
+}
+
+/* Buttons */
+.btn {
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn.active {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+
+.btn-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Status badges */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.badge-live {
+  background: #00c85320;
+  color: #00c853;
+  border: 1px solid #00c85340;
+}
+
+.badge-stale {
+  background: #ffb34720;
+  color: var(--warning);
+  border: 1px solid #ffb34740;
+}
+
+.badge-error {
+  background: #ff4d4d20;
+  color: var(--danger);
+  border: 1px solid #ff4d4d40;
+}
+
+/* Status bar at top of panel */
+#status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+}
+
+/* Loading spinner */
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--panel-border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Message overlays */
+#message-overlay {
+  display: none;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--panel-bg);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 30px 40px;
+  text-align: center;
+  z-index: 50;
+}
+
+#message-overlay.visible {
+  display: block;
+}
+
+#message-overlay h3 {
+  color: var(--accent);
+  margin-bottom: 8px;
+}
+
+#message-overlay p {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
+/* About panel (modal) */
+#about-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  z-index: 200;
+  justify-content: center;
+  align-items: center;
+}
+
+#about-modal.visible {
+  display: flex;
+}
+
+#about-content {
+  background: #151928;
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 30px;
+  max-width: 600px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+  line-height: 1.7;
+}
+
+#about-content h2 {
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+
+#about-content h3 {
+  color: var(--accent-dim);
+  margin-top: 16px;
+  margin-bottom: 6px;
+}
+
+#about-content p {
+  color: var(--text-dim);
+  margin-bottom: 10px;
+  font-size: 0.9rem;
+}
+
+#about-close {
+  float: right;
+  font-size: 1.2rem;
+  cursor: pointer;
+  color: var(--text-dim);
+  background: none;
+  border: none;
+}
+
+#about-close:hover {
+  color: var(--text);
+}
+
+/* Chart container */
+#altitude-chart-container {
+  border-top: 1px solid var(--panel-border);
+  padding-top: 12px;
+}
+
+#altitude-chart-container h2 {
+  font-size: 0.75rem;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  margin-bottom: 8px;
+}
+
+#altitude-chart {
+  width: 100%;
+  height: 150px;
+}
+
+/* --- Responsive --------------------------------------------------------- */
+@media (max-width: 768px) {
+  #app {
+    flex-direction: column-reverse;
+  }
+
+  #info-panel {
+    width: 100%;
+    min-width: unset;
+    max-height: 40vh;
+    border-left: none;
+    border-top: 1px solid var(--panel-border);
+  }
+
+  #globe-container {
+    height: 60vh;
+  }
+}
+
+/* Scrollbar styling */
+#info-panel::-webkit-scrollbar {
+  width: 6px;
+}
+
+#info-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#info-panel::-webkit-scrollbar-thumb {
+  background: var(--panel-border);
+  border-radius: 3px;
+}
+
+#info-panel::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-dim);
+}
