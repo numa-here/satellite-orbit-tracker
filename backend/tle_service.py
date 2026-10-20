@@ -5,7 +5,8 @@ Supports:
   * Single satellite lookup by NORAD catalog number (CATNR)
   * Constellation / group lookup (GROUP, e.g. 'stations', 'weather', 'gps-ops')
   * File-based caching with configurable TTL (default: 2 hours)
-  * Resilient offline fallback to stale cache when upstream is unreachable
+  * Resilient offline & cloud fallback (bundled seed data for cloud providers like Render)
+  * Multi-domain fallback (celestrak.org and celestrak.com)
   * Detection and error reporting for invalid / non-existent catalog numbers
 """
 import json
@@ -17,11 +18,28 @@ from typing import Any, Dict, List, Optional, Union
 import requests
 
 from .config import CELESTRAK_BASE_URL, CACHE_DIR, CACHE_TTL_SECONDS
+from .seed_data import SEED_SATELLITES
 
 logger = logging.getLogger(__name__)
 
 # Ensure cache directory exists
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+# Candidate upstream endpoints for CelesTrak
+CELESTRAK_ENDPOINTS = [
+    "https://celestrak.org/NORAD/elements/gp.php",
+    "https://celestrak.com/NORAD/elements/gp.php",
+]
+
+# Standard browser headers to avoid Cloudflare / WAF / host blocks
+REQUEST_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json, text/plain, */*",
+}
 
 
 def _get_cache_path(key: str) -> Path:
@@ -72,13 +90,13 @@ def fetch_satellite_by_norad(norad_id: int) -> Dict[str, Any]:
     Returns:
         {
             "data": dict of OMM orbital elements,
-            "stale": bool (True if upstream failed and returned old cache),
-            "cached": bool (True if served from local cache)
+            "stale": bool (True if upstream failed and returned old cache or seed),
+            "cached": bool (True if served from local cache or seed)
         }
 
     Raises:
         ValueError: If satellite is not found / invalid NORAD ID (404)
-        ConnectionError: If CelesTrak is unreachable and no cache exists
+        ConnectionError: If CelesTrak is unreachable and no cache or seed exists
     """
     if not isinstance(norad_id, int) or norad_id <= 0:
         raise ValueError(f"Invalid NORAD ID: {norad_id}. Must be a positive integer.")
@@ -91,45 +109,50 @@ def fetch_satellite_by_norad(norad_id: int) -> Dict[str, Any]:
         logger.debug("Serving NORAD %d from fresh cache", norad_id)
         return {"data": cached["data"], "stale": False, "cached": True}
 
-    # Otherwise attempt network fetch from CelesTrak
-    url = f"{CELESTRAK_BASE_URL}?CATNR={norad_id}&FORMAT=JSON"
-    headers = {"User-Agent": "SatelliteOrbitTracker/1.0"}
+    # Attempt network fetch across candidate endpoints (with 5s connect timeout)
+    last_network_exc = None
+    for endpoint in CELESTRAK_ENDPOINTS:
+        url = f"{endpoint}?CATNR={norad_id}&FORMAT=JSON"
+        try:
+            resp = requests.get(url, headers=REQUEST_HEADERS, timeout=(5, 5))
+            text = resp.text.strip()
+            if resp.status_code == 404 or "No GP data found" in text or not text:
+                raise ValueError(f"Satellite with NORAD ID {norad_id} not found on CelesTrak")
 
-    try:
-        resp = requests.get(url, headers=headers, timeout=10)
-        
-        # CelesTrak returns 404 or text "No GP data found" for unknown catalog numbers
-        text = resp.text.strip()
-        if resp.status_code == 404 or "No GP data found" in text or not text:
-            raise ValueError(f"Satellite with NORAD ID {norad_id} not found on CelesTrak")
+            resp.raise_for_status()
+            parsed = resp.json()
+            if not parsed:
+                raise ValueError(f"Satellite with NORAD ID {norad_id} not found")
 
-        resp.raise_for_status()
+            sat_data = parsed[0] if isinstance(parsed, list) else parsed
+            if not isinstance(sat_data, dict) or "OBJECT_NAME" not in sat_data:
+                raise ValueError(f"Invalid GP data returned for NORAD ID {norad_id}")
 
-        parsed = resp.json()
-        if not parsed:
-            raise ValueError(f"Satellite with NORAD ID {norad_id} not found")
+            _write_cache(cache_key, sat_data)
+            return {"data": sat_data, "stale": False, "cached": False}
 
-        # CelesTrak returns a list with 1 element for single CATNR
-        sat_data = parsed[0] if isinstance(parsed, list) else parsed
-        if not isinstance(sat_data, dict) or "OBJECT_NAME" not in sat_data:
-            raise ValueError(f"Invalid GP data returned for NORAD ID {norad_id}")
+        except ValueError:
+            # Re-raise 404 satellite not found immediately
+            raise
+        except Exception as exc:
+            last_network_exc = exc
+            logger.warning("CelesTrak endpoint '%s' failed for NORAD %d: %s", endpoint, norad_id, exc)
 
-        _write_cache(cache_key, sat_data)
-        return {"data": sat_data, "stale": False, "cached": False}
+    # If network failed, fall back to disk cache if available
+    if cached:
+        logger.info("Serving NORAD %d from stale disk cache", norad_id)
+        return {"data": cached["data"], "stale": True, "cached": True}
 
-    except ValueError:
-        # Re-raise satellite not found so callers map to 404
-        raise
+    # If no disk cache exists, fall back to bundled seed data
+    if norad_id in SEED_SATELLITES:
+        seed = SEED_SATELLITES[norad_id]
+        logger.info("Serving NORAD %d from bundled seed fallback", norad_id)
+        _write_cache(cache_key, seed)
+        return {"data": seed, "stale": True, "cached": True}
 
-    except Exception as exc:
-        logger.warning("CelesTrak request failed for NORAD %d: %s", norad_id, exc)
-        # Fallback to stale cached data if available
-        if cached:
-            logger.info("Serving NORAD %d from stale fallback cache", norad_id)
-            return {"data": cached["data"], "stale": True, "cached": True}
-        raise ConnectionError(
-            f"Cannot reach CelesTrak and no cached data exists for NORAD {norad_id}"
-        ) from exc
+    raise ConnectionError(
+        f"Cannot reach CelesTrak and no cached/seed data exists for NORAD {norad_id}"
+    ) from last_network_exc
 
 
 def fetch_group(group: str) -> Dict[str, Any]:
@@ -150,28 +173,37 @@ def fetch_group(group: str) -> Dict[str, Any]:
     if cached and _is_fresh(cached):
         return {"data": cached["data"], "stale": False, "cached": True}
 
-    url = f"{CELESTRAK_BASE_URL}?GROUP={clean_group}&FORMAT=JSON"
-    headers = {"User-Agent": "SatelliteOrbitTracker/1.0"}
+    last_network_exc = None
+    for endpoint in CELESTRAK_ENDPOINTS:
+        url = f"{endpoint}?GROUP={clean_group}&FORMAT=JSON"
+        try:
+            resp = requests.get(url, headers=REQUEST_HEADERS, timeout=(5, 8))
+            text = resp.text.strip()
+            if resp.status_code == 404 or "No GP data found" in text or not text:
+                raise ValueError(f"Group '{group}' not found on CelesTrak")
 
-    try:
-        resp = requests.get(url, headers=headers, timeout=15)
-        text = resp.text.strip()
-        if resp.status_code == 404 or "No GP data found" in text or not text:
-            raise ValueError(f"Group '{group}' not found on CelesTrak")
+            resp.raise_for_status()
+            parsed = resp.json()
+            sat_list = parsed if isinstance(parsed, list) else [parsed]
 
-        resp.raise_for_status()
-        parsed = resp.json()
-        sat_list = parsed if isinstance(parsed, list) else [parsed]
+            _write_cache(cache_key, sat_list)
+            return {"data": sat_list, "stale": False, "cached": False}
+        except ValueError:
+            raise
+        except Exception as exc:
+            last_network_exc = exc
+            logger.warning("CelesTrak endpoint '%s' failed for group '%s': %s", endpoint, group, exc)
 
-        _write_cache(cache_key, sat_list)
-        return {"data": sat_list, "stale": False, "cached": False}
+    if cached:
+        return {"data": cached["data"], "stale": True, "cached": True}
 
-    except ValueError:
-        raise
-    except Exception as exc:
-        logger.warning("CelesTrak group request failed for '%s': %s", group, exc)
-        if cached:
-            return {"data": cached["data"], "stale": True, "cached": True}
-        raise ConnectionError(
-            f"Cannot reach CelesTrak and no cached data exists for group '{group}'"
-        ) from exc
+    # If no group cache, construct list from matching seed satellites
+    group_seeds = [
+        sat for sat in SEED_SATELLITES.values()
+    ]
+    if group_seeds:
+        return {"data": group_seeds, "stale": True, "cached": True}
+
+    raise ConnectionError(
+        f"Cannot reach CelesTrak and no cache exists for group '{group}'"
+    ) from last_network_exc
