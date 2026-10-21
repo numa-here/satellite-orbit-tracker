@@ -9,151 +9,107 @@
 <body>
 
   <div id="app">
+    <!-- Top header: logo left, icon toolbar center, auth buttons right -->
+    <header id="top-header">
+      <div class="header-brand">
+        <span class="logo">🛰️</span>
+        <span class="app-name">Satellite Tracker 3D</span>
+      </div>
+
+      <!-- Top-center floating toolbar: globe/satellite controls -->
+      <div class="toolbar center-toolbar" id="center-toolbar">
+        <button class="icon-btn" id="btn-toggle-sats" title="Toggle satellites">🛰️</button>
+        <button class="icon-btn" id="btn-toggle-earth" title="Toggle Earth texture">🌍</button>
+        <button class="icon-btn" id="btn-refresh" title="Refresh catalog">↻</button>
+        <button class="icon-btn" id="btn-undo" title="Undo camera/selection">↩</button>
+        <button class="icon-btn" id="btn-redo" title="Redo camera/selection">↪</button>
+      </div>
+
+      <div class="header-actions">
+        <button class="header-btn" id="btn-blog">Blog</button>
+        <button class="header-btn" id="btn-contact">Contact</button>
+        <button class="header-btn" id="btn-signin">Sign In</button>
+      </div>
+    </header>
+
+    <!-- Top-left floating search card -->
+    <div class="floating-card" id="search-card">
+      <label class="search-label">Name or NORAD ID</label>
+      <div class="search-wrapper">
+        <input type="search" id="catalog-search" placeholder="Search satellites…" />
+        <div id="search-dropdown" class="search-dropdown"></div>
+      </div>
+      <div id="catalog-count" class="catalog-count">
+        Showing <span id="count-shown">0</span> of <span id="count-total">0</span>
+      </div>
+    </div>
+
+    <!-- Top-right floating panel triggers -->
+    <div class="floating-card right-toolbar" id="panel-triggers">
+      <button class="icon-btn panel-trigger" id="btn-panel-info" title="Info (selected satellite)">ℹ️</button>
+      <button class="icon-btn panel-trigger" id="btn-panel-speed" title="Speed / time controls">⏱️</button>
+      <button class="icon-btn panel-trigger" id="btn-panel-graphs" title="Graphs (altitude/speed/lat/lon)">📊</button>
+      <button class="icon-btn panel-trigger" id="btn-panel-settings" title="Settings (filters & display)">⚙️</button>
+    </div>
+
     <!-- 3D Globe -->
     <div id="globe-container">
       <div id="message-overlay">
         <h3 id="overlay-title">Loading…</h3>
-        <p id="overlay-text">Fetching satellite data</p>
+        <p id="overlay-text">Fetching satellite catalog</p>
+      </div>
+      <div id="hover-tooltip" class="tooltip"></div>
+    </div>
+
+    <!-- Bottom-left HUD card (monospace live data) -->
+    <div class="floating-card hud-card" id="hud">
+      <div class="hud-title" id="hud-title">Click or search a satellite</div>
+      <div class="hud-row"><span class="hud-label">Speed:</span> <span class="hud-value" id="hud-speed">0 km/h</span></div>
+      <div class="hud-row"><span class="hud-label">Height:</span> <span class="hud-value" id="hud-height">0 km</span></div>
+      <div class="hud-row"><span class="hud-label">Latitude:</span> <span class="hud-value" id="hud-lat">0.00°</span></div>
+      <div class="hud-row"><span class="hud-label">Longitude:</span> <span class="hud-value" id="hud-lon">0.00°</span></div>
+    </div>
+
+    <!-- Floating glass panels (closed by default) -->
+    <div class="glass-panel" id="panel-info">
+      <button class="panel-close" id="close-panel-info">&times;</button>
+      <h3 class="panel-title">Info</h3>
+      <div id="panel-info-content"></div>
+    </div>
+    <div class="glass-panel" id="panel-speed">
+      <button class="panel-close" id="close-panel-speed">&times;</button>
+      <h3 class="panel-title">Speed / Time</h3>
+      <div id="panel-speed-content"></div>
+    </div>
+    <div class="glass-panel" id="panel-graphs">
+      <button class="panel-close" id="close-panel-graphs">&times;</button>
+      <h3 class="panel-title">Graphs</h3>
+      <div id="panel-graphs-content"></div>
+    </div>
+    <div class="glass-panel" id="panel-settings">
+      <button class="panel-close" id="close-panel-settings">&times;</button>
+      <h3 class="panel-title">Settings</h3>
+      <div class="filter-section">
+        <h4>Category</h4>
+        <div class="filter-chips" id="category-filters"></div>
+      </div>
+      <div class="filter-section">
+        <h4>Orbit Regime</h4>
+        <div class="filter-chips" id="orbit-filters"></div>
+      </div>
+      <div class="filter-section">
+        <h4>Object Type</h4>
+        <div class="filter-chips" id="type-filters"></div>
+      </div>
+      <div class="filter-section">
+        <h4>Catalog</h4>
+        <div id="category-legend"></div>
       </div>
     </div>
 
-    <!-- Right-side info panel -->
-    <div id="info-panel">
-      <h1><span class="logo-icon">🛰️</span> Orbit Tracker</h1>
-
-      <!-- Status bar -->
-      <div id="status-bar">
-        <div class="spinner" id="loading-spinner"></div>
-        <span id="status-text">Connecting…</span>
-        <span id="status-badge" class="badge badge-live" style="display:none">LIVE</span>
-      </div>
-
-      <!-- Satellite selector -->
-      <div class="selector-group">
-        <label for="sat-select">Satellite</label>
-        <select id="sat-select">
-          <option value="25544">ISS (ZARYA)</option>
-        </select>
-      </div>
-
-      <!-- Action buttons -->
-      <div class="btn-row">
-        <button class="btn" id="btn-follow">📷 Follow</button>
-        <button class="btn" id="btn-about">ℹ️ About</button>
-      </div>
-
-      <!-- Position data -->
-      <div class="data-section" id="position-section">
-        <h2>Position</h2>
-        <div class="data-row">
-          <span class="label">Latitude</span>
-          <span class="value" id="val-lat">—</span>
-        </div>
-        <div class="data-row">
-          <span class="label">Longitude</span>
-          <span class="value" id="val-lon">—</span>
-        </div>
-        <div class="data-row">
-          <span class="label">Altitude
-            <span class="info-icon" data-tip="Height above sea level in kilometers.">i</span>
-          </span>
-          <span class="value" id="val-alt">—</span>
-        </div>
-        <div class="data-row">
-          <span class="label">Speed
-            <span class="info-icon" data-tip="Orbital velocity in km/s. The ISS travels at about 7.66 km/s.">i</span>
-          </span>
-          <span class="value" id="val-speed">—</span>
-        </div>
-        <div class="data-row">
-          <span class="label">Direction</span>
-          <span class="value" id="val-direction">—</span>
-        </div>
-        <div class="data-row">
-          <span class="label">UTC Time</span>
-          <span class="value" id="val-time">—</span>
-        </div>
-      </div>
-
-      <!-- TLE info -->
-      <div class="data-section" id="tle-section">
-        <h2>TLE Info</h2>
-        <div class="data-row">
-          <span class="label">NORAD ID
-            <span class="info-icon" data-tip="Unique catalog number assigned to every tracked object in Earth orbit.">i</span>
-          </span>
-          <span class="value" id="val-norad">—</span>
-        </div>
-        <div class="data-row">
-          <span class="label">TLE Epoch
-            <span class="info-icon" data-tip="The reference time when the orbital elements were measured. Predictions are most accurate near this time.">i</span>
-          </span>
-          <span class="value" id="val-epoch">—</span>
-        </div>
-        <div class="data-row">
-          <span class="label">TLE Age</span>
-          <span class="value" id="val-age">—</span>
-        </div>
-      </div>
-
-      <!-- Orbital elements -->
-      <div class="data-section" id="elements-section">
-        <h2>Orbital Elements</h2>
-        <div class="data-row">
-          <span class="label">Inclination
-            <span class="info-icon" data-tip="Tilt of the orbit relative to Earth's equator in degrees. The ISS has an inclination of about 51.6°.">i</span>
-          </span>
-          <span class="value" id="val-inc">—</span>
-        </div>
-        <div class="data-row">
-          <span class="label">Eccentricity
-            <span class="info-icon" data-tip="Shape of the orbit. 0 = perfect circle, close to 1 = very elongated ellipse. Most LEO satellites are near 0.">i</span>
-          </span>
-          <span class="value" id="val-ecc">—</span>
-        </div>
-        <div class="data-row">
-          <span class="label">RAAN
-            <span class="info-icon" data-tip="Right Ascension of the Ascending Node – the angle from the vernal equinox to where the orbit crosses the equator going north.">i</span>
-          </span>
-          <span class="value" id="val-raan">—</span>
-        </div>
-        <div class="data-row">
-          <span class="label">Arg. of Perigee
-            <span class="info-icon" data-tip="Argument of Perigee – the angle from the ascending node to the orbit's closest point to Earth.">i</span>
-          </span>
-          <span class="value" id="val-argp">—</span>
-        </div>
-        <div class="data-row">
-          <span class="label">Mean Anomaly
-            <span class="info-icon" data-tip="Where the satellite was in its orbit at the TLE epoch, measured as an angle from perigee.">i</span>
-          </span>
-          <span class="value" id="val-ma">—</span>
-        </div>
-        <div class="data-row">
-          <span class="label">Mean Motion
-            <span class="info-icon" data-tip="Number of complete orbits the satellite makes per day. The ISS does about 15.5 orbits/day.">i</span>
-          </span>
-          <span class="value" id="val-mm">—</span>
-        </div>
-        <div class="data-row">
-          <span class="label">Period
-            <span class="info-icon" data-tip="Time for one complete orbit in minutes. Calculated as 1440 / mean motion.">i</span>
-          </span>
-          <span class="value" id="val-period">—</span>
-        </div>
-        <div class="data-row">
-          <span class="label">B*
-            <span class="info-icon" data-tip="Drag term (B-star) – models atmospheric drag on the satellite. Higher values mean more drag.">i</span>
-          </span>
-          <span class="value" id="val-bstar">—</span>
-        </div>
-      </div>
-
-      <!-- Altitude chart -->
-      <div id="altitude-chart-container">
-        <h2>Altitude vs Time</h2>
-        <canvas id="altitude-chart"></canvas>
-      </div>
+    <!-- Bottom stats -->
+    <div id="bottom-stats">
+      <span id="stats-text">Ready</span>
     </div>
   </div>
 
@@ -188,10 +144,11 @@
   <script src="https://unpkg.com/globe.gl@2.35.1/dist/globe.gl.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
-  <!-- App scripts (order matters) -->
+  <!-- App scripts -->
   <script src="/js/api.js"></script>
-  <script src="/js/globe.js"></script>
   <script src="/js/panel.js"></script>
-  <script src="/js/app.js"></script>
+  <script type="module" src="/js/catalog-ui.js"></script>
+  <script type="module" src="/js/globe.js"></script>
+  <script type="module" src="/js/app.js"></script>
 </body>
 </html>
