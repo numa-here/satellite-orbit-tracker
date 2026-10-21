@@ -82,45 +82,6 @@ A high-performance real-time satellite tracking web application. Select any sate
 
 ---
 
-## 🚀 Quickstart & Setup
-
-### 1. Clone the repository
-```bash
-git clone https://github.com/numa-here/satellite-orbit-tracker.git
-cd satellite-orbit-tracker
-```
-
-### 2. Create and activate a Python virtual environment
-```bash
-# On Linux / macOS:
-python3 -m venv venv
-source venv/bin/activate
-
-# On Windows (PowerShell):
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-```
-
-### 3. Install dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Configure environment (optional)
-```bash
-cp .env.example .env
-```
-
-### 5. Launch the application
-```bash
-uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-### 6. Open the app
-Navigate your browser to [http://localhost:8000](http://localhost:8000).
-
----
-
 ## 📡 API Reference
 
 | Method | Endpoint | Query Parameters | Description |
