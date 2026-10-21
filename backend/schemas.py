@@ -98,3 +98,45 @@ class HealthResponse(BaseModel):
     """Response returned by GET /api/health."""
     status: str = Field("ok", description="Server status")
     timestamp: str = Field(..., description="Current UTC timestamp")
+
+
+# ---- Full Catalog Schemas -------------------------------------------------
+
+class CatalogEntry(BaseModel):
+    """One compact catalog object returned by GET /api/catalog."""
+    norad_id: int = Field(..., description="NORAD catalog identifier")
+    name: str = Field(..., description="Satellite/object name")
+    object_type: Optional[str] = Field(None, description="SATCAT object type: PAY, R/B, DEB, UNK, etc.")
+    category: Optional[str] = Field(None, description="UI category: payload, rocket_body, debris, constellation, gnss, weather, crewed, unknown")
+    country: Optional[str] = Field(None, description="Owner/country from SATCAT")
+    launch_date: Optional[str] = Field(None, description="Launch date ISO-8601")
+    launch_site: Optional[str] = Field(None, description="Launch site")
+    intl_designator: Optional[str] = Field(None, description="International designator")
+    orbit_class: Optional[str] = Field(None, description="Orbit class/regime label")
+    orbit_regime: Optional[str] = Field(None, description="Computed LEO/MEO/GEO/HEO regime")
+    line1: Optional[str] = Field(None, description="TLE line 1 when available")
+    line2: Optional[str] = Field(None, description="TLE line 2 when available")
+    omm: Optional[dict] = Field(None, description="Full OMM mean elements when TLE lines are unavailable")
+    source: Optional[str] = Field(None, description="Data source: keeptrack or celestrak")
+    group: Optional[str] = Field(None, description="CelesTrak group the object came from")
+    decay_date: Optional[str] = Field(None, description="Decay date if known")
+    period_minutes: Optional[float] = Field(None, description="SATCAT orbital period")
+    apogee_km: Optional[float] = Field(None, description="Apogee altitude km")
+    perigee_km: Optional[float] = Field(None, description="Perigee altitude km")
+    inclination_deg: Optional[float] = Field(None, description="Inclination degrees")
+    rcs_m2: Optional[float] = Field(None, description="Radar cross section m^2")
+    stale: bool = Field(False, description="Served from stale/offline cache")
+
+
+class CatalogResponse(BaseModel):
+    """Response returned by GET /api/catalog."""
+    objects: List[CatalogEntry]
+    count: int = Field(..., description="Number of objects returned")
+    sources: List[str] = Field(..., description="Sources used to build the catalog")
+    cached: bool = Field(False, description="Served from local cache")
+    stale: bool = Field(False, description="Served from stale/offline cache")
+    updated_at: Optional[float] = Field(None, description="Cache timestamp epoch seconds")
+
+
+class CatalogError(Exception):
+    """Raised when the catalog cannot be built and no fallback exists."""
