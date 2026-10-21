@@ -84,7 +84,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     showLoading('Loading satellite catalog…');
     const catalog = await apiCatalog(false);
-    const entries = catalog.satellites || catalog.entries || catalog;
+    // Backend returns {"objects": [...], "count": N, "sources": [...], "updated_at": ...}
+    // Frontend expects a list of satellite entries
+    const entries = catalog.objects || [];
     globeSetCatalog(entries);
     catalogSetCatalog(entries);
     catalogLoaded = true;
