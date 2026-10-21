@@ -51,3 +51,12 @@ function apiTrack(noradId, minutes = 90, step = 30) {
 function apiElements(noradId) {
   return apiFetch(`/api/elements?sat=${noradId}`);
 }
+
+/**
+ * GET /api/catalog?refresh=<bool>
+ * Returns the full merged satellite catalog.
+ * @param {boolean} refresh - Bypass fresh cache and rebuild from upstream.
+ */
+function apiCatalog(refresh = false) {
+  return apiFetch(`/api/catalog?refresh=${refresh}`);
+}
