@@ -165,3 +165,7 @@ satellite-orbit-tracker/
 ## 📄 License
 
 This project is licensed under the MIT License.
+
+## 🛠️ Development
+
+* **Chart.js Fix**: Fixed TypeScript error `',' expected` in `frontend/js/panel.js` line 338. The issue was a missing trailing comma after `animation: { duration: 0 }` in the Chart.js options configuration. This was causing the parser to expect a comma on the following line.
