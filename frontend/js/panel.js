@@ -335,7 +335,7 @@ function renderGraphsPanel() {
       options: { responsive: true, maintainAspectRatio: false, animation: { duration: 0 },
         plugins: { legend: { display: false } },
         scales: { x: { display: false }, y: { display: true, ticks: { color: '#8892a0', font: { size: 9 } }, grid: { color: '#1e2a3a40' } } },
-      });
+      }});
   }
 }
 
