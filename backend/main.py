@@ -14,7 +14,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import DEFAULT_SATELLITES, SATELLITE_GROUPS
+from starlette.middleware.gzip import GZipMiddleware
 from .propagation import build_satellite, get_elements, get_position, get_track
+from .catalog_service import CatalogError, get_catalog
 from .schemas import (
     ErrorResponse,
     HealthResponse,
@@ -23,6 +25,7 @@ from .schemas import (
     SatelliteInfo,
     GroupInfo,
     SatelliteListResponse,
+    CatalogResponse,
     TrackPoint,
     TrackResponse,
 )
@@ -44,6 +47,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -77,6 +81,26 @@ async def list_satellites():
     sats = [SatelliteInfo(**s) for s in DEFAULT_SATELLITES]
     groups = [GroupInfo(**g) for g in SATELLITE_GROUPS]
     return SatelliteListResponse(satellites=sats, groups=groups)
+@app.get(
+    "/api/catalog",
+    response_model=CatalogResponse,
+    summary="Full compact satellite catalog",
+    tags=["Catalog"],
+)
+async def get_catalog_endpoint(
+    refresh: bool = Query(False, description="Bypass fresh cache and rebuild from upstream")
+):
+    """Return the merged, deduplicated full satellite catalog.
+
+    Sources are KeepTrack (when configured) then CelesTrak GP groups, enriched
+    from CelesTrak SATCAT. Results are disk-cached and gzipped.
+    """
+    try:
+        data = get_catalog(force_refresh=refresh)
+    except CatalogError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return JSONResponse(content=data)
+
 
 
 @app.get(

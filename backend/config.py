@@ -51,3 +51,31 @@ SATELLITE_GROUPS = [
 # ---------------------------------------------------------------------------
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
+KEEPTRACK_API_KEY = os.getenv("KEEPTRACK_API_KEY", "")
+KEEPTRACK_BASE_URL = os.getenv("KEEPTRACK_BASE_URL", "https://api.keeptrack.space")
+
+CATALOG_CACHE_TTL_SECONDS = int(os.getenv("CATALOG_CACHE_TTL_SECONDS", "7200"))
+SATCAT_CACHE_TTL_SECONDS = int(os.getenv("SATCAT_CACHE_TTL_SECONDS", "86400"))
+SATCAT_URL = os.getenv(
+    "SATCAT_URL",
+    "https://celestrak.org/satcat/records.php?FORMAT=JSON&MAX=150000",
+)
+
+CELESTRAK_GP_GROUPS = [
+    "active",
+    "starlink",
+    "oneweb",
+    "gps-ops",
+    "galileo",
+    "beidou",
+    "glo-ops",
+    "weather",
+    "geo",
+    "science",
+    "amateur",
+    "iridium-NEXT",
+    "cosmos-2251-debris",
+    "iridium-33-debris",
+    "fengyun-1c-debris",
+    "cosmos-1408-debris",
+]
