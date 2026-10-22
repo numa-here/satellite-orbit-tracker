@@ -34,6 +34,9 @@ window.globeApp = {
     if (select) select.value = currentSatId;
     // Shareable URL hash
     history.replaceState(null, '', `#norad=${currentSatId}`);
+    document.querySelectorAll('.glass-panel').forEach(panel => panel.classList.remove('visible'));
+    document.getElementById('panel-info')?.classList.add('visible');
+    window.switchInfoTab?.('overview');
     loadSatellite(currentSatId);
     updateHudFromEntry(entry);
   },
@@ -474,20 +477,44 @@ function propagateOmmPosition(entry, timeMs) {
     if (!result?.position || !result?.velocity) return null;
     const geo = window.satellite.eciToGeodetic(result.position, window.satellite.gstime(date));
     if (!geo) return null;
+    const latitude = geo.latitude * 180 / Math.PI;
+    const longitude = window.satellite.degreesLong(geo.longitude);
+    const nextDate = new Date(timeMs + 10000);
+    const nextResult = window.satellite.propagate(satrec, nextDate);
+    const nextGeo = nextResult?.position
+      ? window.satellite.eciToGeodetic(nextResult.position, window.satellite.gstime(nextDate))
+      : null;
+    const heading = nextGeo
+      ? groundTrackHeading(latitude, longitude,
+        nextGeo.latitude * 180 / Math.PI,
+        window.satellite.degreesLong(nextGeo.longitude))
+      : { degrees: null, direction: '' };
     const epoch = entry.omm.EPOCH || null;
     const ageDays = epoch ? (date.getTime() - Date.parse(epoch)) / 86400000 : null;
     return {
       name: entry.name, norad_id: entry.norad_id,
-      latitude: geo.latitude * 180 / Math.PI,
-      longitude: window.satellite.degreesLong(geo.longitude),
+      latitude,
+      longitude,
       altitude_km: geo.height,
       velocity_km_s: Math.hypot(result.velocity.x, result.velocity.y, result.velocity.z),
-      heading_degrees: null, direction: '', utc_time: date.toISOString(),
+      heading_degrees: heading.degrees, direction: heading.direction, utc_time: date.toISOString(),
       tle_epoch: epoch, tle_age_days: Number.isFinite(ageDays) ? ageDays : null,
       stale_tle: Boolean(entry.stale) || (Number.isFinite(ageDays) && ageDays > 7),
       stale_warning: entry.stale ? 'Catalog is using a cached or bundled orbital record.' : null,
     };
   } catch (_) { return null; }
+}
+
+function groundTrackHeading(latitude, longitude, nextLatitude, nextLongitude) {
+  const radians = Math.PI / 180;
+  const lat1 = latitude * radians;
+  const lat2 = nextLatitude * radians;
+  const deltaLon = (nextLongitude - longitude) * radians;
+  const y = Math.sin(deltaLon) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLon);
+  const degrees = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  const compass = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][Math.round(degrees / 45) % 8];
+  return { degrees, direction: compass };
 }
 
 function propagateOmmTrack(entry, startTime) {
