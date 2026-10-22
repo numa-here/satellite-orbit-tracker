@@ -60,6 +60,14 @@ export function initGlobe(containerId) {
       .onPointClick(point => selectSatellite(point.norad_id))
       (container);
 
+    // globe.gl may clear its canvas with an opaque color even when the
+    // renderer was created with alpha enabled. Keep the page starfield and
+    // textured CSS Earth fallback visible beneath the WebGL scene.
+    const renderer = globe.renderer();
+    renderer.setClearColor(0x000000, 0);
+    renderer.domElement.style.background = 'transparent';
+    globe.scene().background = null;
+
     // Keep the Earth sphere visible if the texture request fails. Once the
     // texture loads, globe.gl applies it over this fallback material color.
     const globeMaterial = globe.globeMaterial();

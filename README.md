@@ -123,6 +123,8 @@ If the existing Render service is not managed by a Blueprint, set these values i
 
 Set `PYTHON_VERSION` to `3.13.5` in the service environment. No database or API key is required for the default CelesTrak catalog path; `KEEPTRACK_API_KEY` is optional. Never put a real key in `render.yaml` or commit it to Git. Render does not automatically apply a Blueprint file to a dashboard-managed service: connect or sync the Blueprint in Render, or enter the settings above in the existing service.
 
+The app also bundles a sampled 5,000-object active OMM snapshot for deployments that cannot reach the live public feeds. It is marked stale in the UI and live catalog records replace it when available. Refresh the snapshot with `python scripts/refresh_catalog_snapshot.py` before committing an updated copy.
+
 ---
 
 ## 📁 Repository Structure
@@ -142,7 +144,9 @@ satellite-orbit-tracker/
 │   ├── tle_service.py        # CelesTrak fetcher and disk caching
 │   ├── propagation.py        # Skyfield / SGP4 orbital mechanics
 │   ├── seed_data.py          # Bundled OMM fallback for popular satellites
-│   └── schemas.py            # Pydantic response models
+│   ├── schemas.py            # Pydantic response models
+│   └── data/
+│       └── active_omm_snapshot.json # Offline catalog snapshot (5,000 objects)
 ├── frontend/
 │   ├── index.html            # Main web layout
 │   ├── css/
@@ -161,7 +165,8 @@ satellite-orbit-tracker/
 │   ├── test_catalog_merge.py # Catalog merge and deduplication tests
 │   └── test_api.py           # FastAPI integration tests
 ├── scripts/
-│   └── check_secrets.sh      # Secret scanning helper
+│   ├── check_secrets.sh      # Secret scanning helper
+│   └── refresh_catalog_snapshot.py # Refresh offline OMM data
 └── docs/
     └── ABOUT.md              # In-depth orbital mechanics reference
 ```

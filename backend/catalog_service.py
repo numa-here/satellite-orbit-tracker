@@ -340,13 +340,12 @@ def build_catalog(limit: Optional[int] = None, offset: int = 0) -> Dict[str, Any
     celestrak_ok = False
     celestrak_present = False
     retlector_present = False
-    # The active GP group already contains the broad catalog (thousands of
-    # trackable objects). Fetching many overlapping groups serially through
-    # unreachable upstreams made the first page load take minutes on Render.
-    # Start with active for a prompt, large catalog; additional groups can be
-    # added here when a provider is reachable without blocking the first view.
-    groups_to_fetch = ["active"]
-    with ThreadPoolExecutor(max_workers=min(8, max(1, len(groups_to_fetch)))) as pool:
+    # The active group supplies thousands of objects; companion groups add
+    # constellation and debris coverage. Run all group requests concurrently
+    # so an unreachable provider costs one bounded timeout window, not one per
+    # group.
+    groups_to_fetch = CELESTRAK_GP_GROUPS
+    with ThreadPoolExecutor(max_workers=max(1, len(groups_to_fetch))) as pool:
         futures = {pool.submit(fetch_group, group): group for group in groups_to_fetch}
         for future in as_completed(futures):
             group = futures[future]
@@ -374,8 +373,37 @@ def build_catalog(limit: Optional[int] = None, offset: int = 0) -> Dict[str, Any
                     entry.stale = group_stale
                     items[entry.norad_id] = entry
 
-    # Fresh upstream entries take precedence; bundled OMMs keep the app usable
-    # when all public feeds are unreachable.
+    # Render may not be able to reach either public provider. Keep a larger,
+    # periodically refreshed public OMM snapshot bundled so search and the
+    # orbit scene remain useful during an outage. Fresh upstream items already
+    # in ``items`` take precedence over snapshot rows with matching NORAD IDs.
+    snapshot_used = False
+    if len(items) < 500 and not celestrak_present and not retlector_present:
+        try:
+            from pathlib import Path
+            snapshot_path = Path(__file__).parent / "data" / "active_omm_snapshot.json"
+            with snapshot_path.open(encoding="utf-8") as snapshot_file:
+                snapshot_rows = json.load(snapshot_file)
+            from .seed_data import SEED_SATELLITES
+            snapshot_ids = {
+                _safe_int(row.get("NORAD_CAT_ID") or row.get("norad_id"))
+                for row in snapshot_rows if isinstance(row, dict)
+            }
+            snapshot_rows.extend(
+                row for norad_id, row in SEED_SATELLITES.items()
+                if norad_id not in snapshot_ids
+            )
+            for sat_data in snapshot_rows:
+                entry = _normalize_omm(sat_data, "active snapshot")
+                if entry and entry.norad_id not in items:
+                    entry.source = "retlector snapshot"
+                    entry.stale = True
+                    items[entry.norad_id] = entry
+                    snapshot_used = True
+        except (OSError, ValueError, TypeError) as exc:
+            logger.warning("Bundled active catalog snapshot unavailable: %s", exc)
+
+    # Curated OMMs keep the app usable if both feeds and snapshot are absent.
     from .seed_data import SEED_SATELLITES
     seed_used = False
     if not items:
@@ -391,6 +419,8 @@ def build_catalog(limit: Optional[int] = None, offset: int = 0) -> Dict[str, Any
         sources.append("celestrak")
     if retlector_present:
         sources.append("retlector")
+    if snapshot_used:
+        sources.append("retlector snapshot")
     if seed_used:
         sources.append("seed")
 
@@ -430,7 +460,8 @@ def build_catalog(limit: Optional[int] = None, offset: int = 0) -> Dict[str, Any
 
 
 def get_catalog(force_refresh: bool = False) -> Dict[str, Any]:
-    cache_key = "catalog_v1"
+    # v2 invalidates earlier small seed-only catalogs cached under v1.
+    cache_key = "catalog_v2"
     cached = _read_cache(cache_key)
     cached_data = cached.get("data", {}) if isinstance(cached, dict) else {}
     if not isinstance(cached_data, dict):

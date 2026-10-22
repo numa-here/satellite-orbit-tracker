@@ -113,7 +113,7 @@ def fetch_satellite_by_norad(norad_id: int) -> Dict[str, Any]:
     # The catalog already contains the same current OMM data used to plot the
     # selected object. Reuse it for info/position requests instead of making a
     # second CelesTrak round trip for every click in the search list.
-    catalog_cache = _read_cache("catalog_v1")
+    catalog_cache = _read_cache("catalog_v2")
     catalog_data = (catalog_cache or {}).get("data", {})
     if catalog_cache and _is_fresh(catalog_cache) and isinstance(catalog_data, dict):
         for entry in catalog_data.get("objects", []):
@@ -129,26 +129,6 @@ def fetch_satellite_by_norad(norad_id: int) -> Dict[str, Any]:
 
     # Attempt network fetch across candidate endpoints (with 5s connect timeout)
     last_network_exc = None
-    # Render and similar hosts may be unable to reach CelesTrak directly.
-    # Try the public CelesTrak mirror first so a fresh catalog does not wait
-    # through several connection timeouts before receiving usable OMM data.
-    try:
-        mirror = requests.get(
-            f"https://retlector.eu/{clean_group}/json",
-            headers=REQUEST_HEADERS,
-            timeout=(3, 8),
-        )
-        mirror.raise_for_status()
-        parsed = mirror.json()
-        sat_list = parsed if isinstance(parsed, list) else [parsed]
-        sat_list = [item for item in sat_list if isinstance(item, dict)]
-        if sat_list:
-            _write_cache(cache_key, sat_list, provider="retlector")
-            return {"data": sat_list, "stale": False, "cached": False, "provider": "retlector"}
-    except Exception as exc:
-        last_network_exc = exc
-        logger.warning("ReTLEctor mirror failed for group '%s': %s", group, exc)
-
     for endpoint in CELESTRAK_ENDPOINTS:
         url = f"{endpoint}?CATNR={norad_id}&FORMAT=JSON"
         try:
@@ -217,12 +197,32 @@ def fetch_group(group: str) -> Dict[str, Any]:
         }
 
     last_network_exc = None
+    # Render and similar hosts may be unable to reach CelesTrak directly.
+    # Try the public CelesTrak mirror first so a fresh catalog does not wait
+    # through several connection timeouts before receiving usable OMM data.
+    try:
+        mirror = requests.get(
+            f"https://retlector.eu/{clean_group}/json",
+            headers=REQUEST_HEADERS,
+            timeout=(2, 3),
+        )
+        mirror.raise_for_status()
+        parsed = mirror.json()
+        sat_list = parsed if isinstance(parsed, list) else [parsed]
+        sat_list = [item for item in sat_list if isinstance(item, dict)]
+        if sat_list:
+            _write_cache(cache_key, sat_list, provider="retlector")
+            return {"data": sat_list, "stale": False, "cached": False, "provider": "retlector"}
+    except Exception as exc:
+        last_network_exc = exc
+        logger.warning("ReTLEctor mirror failed for group '%s': %s", group, exc)
+
     for endpoint in CELESTRAK_ENDPOINTS:
         url = f"{endpoint}?GROUP={clean_group}&FORMAT=JSON"
         try:
             # Bound the wait for unreachable hosted networks; catalog groups
             # are fetched concurrently by catalog_service.
-            resp = requests.get(url, headers=REQUEST_HEADERS, timeout=(3, 5))
+            resp = requests.get(url, headers=REQUEST_HEADERS, timeout=(2, 2))
             text = resp.text.strip()
             if resp.status_code == 404 or "No GP data found" in text or not text:
                 raise ValueError(f"Group '{group}' not found on CelesTrak")

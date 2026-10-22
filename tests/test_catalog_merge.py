@@ -109,17 +109,18 @@ def test_catalog_missing_satcat_rows_remain_valid(monkeypatch):
     assert entry["orbit_regime"] == "LEO"
 
 
-def test_catalog_build_returns_omm_seeds_when_upstreams_are_empty(monkeypatch):
+def test_catalog_build_uses_large_omm_snapshot_when_upstreams_are_empty(monkeypatch):
     from backend import catalog_service
-    from backend.seed_data import SEED_SATELLITES
 
     _patch_catalog_service(monkeypatch, keep_items=[], celestrak_groups={})
     data = catalog_service.build_catalog()
 
-    assert data["count"] == len(SEED_SATELLITES)
+    assert data["count"] >= 500
     assert data["stale"] is True
-    assert "seed" in data["sources"]
+    assert "retlector snapshot" in data["sources"]
     assert all(entry["omm"] for entry in data["objects"])
+    norad_ids = {entry["norad_id"] for entry in data["objects"]}
+    assert {25544, 41866}.issubset(norad_ids)  # ISS and GOES 16 remain searchable.
 
 
 def test_empty_upstream_and_empty_cache_fall_back_to_omm_seed(monkeypatch):
