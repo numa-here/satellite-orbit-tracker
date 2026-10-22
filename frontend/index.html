@@ -27,11 +27,6 @@
         <button class="icon-btn" id="btn-zoom-out" title="Zoom out">-</button>
       </div>
 
-      <div class="header-actions">
-        <button class="header-btn" id="btn-blog">Blog</button>
-        <button class="header-btn" id="btn-contact">Contact</button>
-        <button class="header-btn" id="btn-signin">Sign In</button>
-      </div>
     </header>
 
     <!-- Top-left floating search card -->
@@ -49,7 +44,7 @@
 
     <!-- Top-right floating panel triggers -->
     <div class="floating-card right-toolbar" id="panel-triggers">
-      <button class="icon-btn panel-trigger" id="btn-panel-info" title="Info (selected satellite)">ℹ️</button>
+      <button class="icon-btn panel-trigger" id="btn-panel-info" title="About this tracker" aria-label="About this tracker">👁️</button>
       <button class="icon-btn panel-trigger" id="btn-panel-speed" title="Speed / time controls">⏱️</button>
       <button class="icon-btn panel-trigger" id="btn-panel-graphs" title="Graphs (altitude/speed/lat/lon)">📊</button>
       <button class="icon-btn panel-trigger" id="btn-panel-settings" title="Settings (filters & display)">⚙️</button>
@@ -76,21 +71,38 @@
     <!-- Search and display filters -->
     <div class="glass-panel" id="panel-settings">
       <button class="panel-close" id="close-panel-settings">&times;</button>
-      <h3 class="panel-title">Display &amp; Filters</h3>
+      <h3 class="panel-title">Settings</h3>
+      <p class="panel-description">Choose a lighter style for these panels. The space background stays dark.</p>
+      <button class="btn-sm" id="panel-theme-toggle" type="button" aria-pressed="false">Use light panels</button>
       <div class="filter-section"><h4>Category</h4><div id="category-filters" class="filter-chip-group"></div></div>
       <div class="filter-section"><h4>Orbit regime</h4><div id="orbit-filters" class="filter-chip-group"></div></div>
       <div class="filter-section"><h4>Object type</h4><div id="type-filters" class="filter-chip-group"></div></div>
       <div class="filter-section"><h4>Country</h4><div id="country-filters" class="filter-chip-group"></div></div>
     </div>
 
+    <div class="glass-panel" id="panel-speed">
+      <button class="panel-close" id="close-panel-speed">&times;</button>
+      <h3 class="panel-title">Orbit time</h3>
+      <p class="panel-description">Change the speed of the satellite animation. Live telemetry remains tied to current time.</p>
+      <div id="simulation-clock" class="simulation-clock">Loading time…</div>
+      <div id="panel-speed-content"></div>
+    </div>
+
+    <div class="glass-panel" id="panel-graphs">
+      <button class="panel-close" id="close-panel-graphs">&times;</button>
+      <h3 class="panel-title">Satellite analysis</h3>
+      <p class="panel-description">Live charts update as telemetry arrives. Select a satellite to see its altitude, speed, and ground position over time.</p>
+      <div id="panel-graphs-content"></div>
+    </div>
+
     <div class="glass-panel" id="panel-info">
       <button class="panel-close" id="close-panel-info">&times;</button>
-      <h3 class="panel-title">Satellite Info</h3>
+      <h3 class="panel-title">About this tracker</h3>
+      <p class="panel-description">Explore Earth orbit in 3D. Search or click a satellite to view its live position, orbital path, and catalog details. Positions are calculated from public orbital elements with SGP4.</p>
       <div class="panel-tabs">
         <button class="tab-btn active" data-tab="overview">Overview</button>
         <button class="tab-btn" data-tab="live">Live Data</button>
         <button class="tab-btn" data-tab="orbit">Orbit</button>
-        <button class="tab-btn" data-tab="graphs">Graphs</button>
       </div>
       <div class="panel-tab-content" id="tab-overview">
         <div class="info-grid">
@@ -196,18 +208,6 @@
           </div>
         </div>
       </div>
-      <div class="panel-tab-content" id="tab-graphs">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px;">
-          <div style="background:#1a1e2e;border:1px solid var(--panel-border);border-radius:8px;padding:10px;">
-            <div style="font-size:0.7rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Altitude (km)</div>
-            <canvas id="graph-altitude" height="120"></canvas>
-          </div>
-          <div style="background:#1a1e2e;border:1px solid var(--panel-border);border-radius:8px;padding:10px;">
-            <div style="font-size:0.7rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Speed (km/s)</div>
-            <canvas id="graph-speed" height="120"></canvas>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- Bottom stats -->
@@ -244,14 +244,12 @@
   </div>
 
   <!-- Libraries from CDN -->
-  <script src="https://unpkg.com/globe.gl@2.35.1/dist/globe.gl.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/globe.gl@2.35.1/dist/globe.gl.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/globe.gl@2.35.1/dist/globe.gl.min.js'"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" onerror="this.onerror=null;this.src='https://unpkg.com/chart.js@4.4.0/dist/chart.umd.js'"></script>
 
   <!-- App scripts -->
   <script src="/js/api.js"></script>
   <script src="/js/panel.js"></script>
-  <script type="module" src="/js/catalog-ui.js"></script>
-  <script type="module" src="/js/globe.js"></script>
   <script type="module" src="/js/app.js"></script>
 </body>
 </html>

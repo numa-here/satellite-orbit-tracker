@@ -9,6 +9,7 @@ import {
   initGlobe, setCatalog as globeSetCatalog, setFilters, setSearch,
   selectSatellite, hoverSatellite, updateSatMarker, drawOrbitPath,
   followSatellite, setFollowMode, getCatalog, getSelectedNorad,
+  setSimulationRate, setSimulationTime, setSatellitesVisible, setEarthVisible,
 } from './globe.js';
 
 import { initCatalogUI, setCatalog as catalogSetCatalog } from './catalog-ui.js';
@@ -57,32 +58,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   initGlobe('globe-container');
   showLoading('Connecting to backend…');
 
-  // 2. Initialize the Web Worker for satellite.js propagation
-  //    Offloads TLE propagation to avoid blocking the main thread
-  const worker = new Worker('/js/satelliteWorker.js', { type: 'module' });
-  worker.onmessage = e => {
-    if (e.data.action === 'positions' && Array.isArray(e.data.positions)) {
-      // Update the Three.js Points geometry with new positions
-      if (window.satellitePointsGeometry) {
-        const positions = [];
-        for (const p of e.data.positions) {
-          positions.push(p.x, p.y, p.z);
-        }
-        window.satellitePointsGeometry.setAttribute(
-          'position',
-          new THREE.BufferAttribute(new Float32Array(positions), 3)
-        );
-      }
-      // Hide loading once positions are ready
-      hideLoading('Catalog loaded: ready');
-    }
-  };
-  worker.onerror = err => {
-    console.error('Satellite worker error:', err);
-    // Continue without worker - globe will render with fallback
-  };
-
-  // 2. Initialize catalog UI (search + filters). catalog-ui owns the search
+  // Initialize catalog UI (search + filters). catalog-ui owns the search
   // input and filter chips, so react to changes centrally via onChange
   // instead of attaching duplicate listeners here.
   initCatalogUI({
@@ -91,7 +67,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const input = document.getElementById('catalog-search');
       const dropdown = document.getElementById('search-dropdown');
       renderSearchDropdown(input, dropdown, entries);
-      globeSetFilters(filters);
+      setFilters(filters);
       // 'setSearch' here is globe.js's export (syncs text filter to the globe layer).
       setSearch(searchQuery);
     },
@@ -148,8 +124,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.warn('Could not load satellite list, using defaults');
   }
 
+  // Build the icon-panel contents before wiring their controls.
+  if (typeof window.renderSpeedPanel === 'function') window.renderSpeedPanel();
+  if (typeof window.renderGraphsPanel === 'function') window.renderGraphsPanel();
   // 6. Wire up UI events
   setupEventListeners();
+  setupPanelTheme();
+  updateSimulationClock();
+  window.setInterval(updateSimulationClock, 1000);
 
   // 7. Initialise chart
   initAltitudeChart();
@@ -232,37 +214,50 @@ function setupEventListeners() {
   }
 
   // Time controls
-  const btnNow = document.getElementById('btn-time-now');
-  const btnFaster = document.getElementById('btn-time-faster');
-  const btnSlower = document.getElementById('btn-time-slower');
-  if (btnNow) btnNow.addEventListener('click', () => {
-    // Reset to current time – worker already uses Date.now()
-    const stats = document.getElementById('stats-text');
-    if (stats) stats.textContent = 'Time: Now';
-  });
-  if (btnFaster) btnFaster.addEventListener('click', () => {
-    const stats = document.getElementById('stats-text');
-    if (stats) stats.textContent = 'Time: Fast-forward';
-  });
-  if (btnSlower) btnSlower.addEventListener('click', () => {
-    const stats = document.getElementById('stats-text');
-    if (stats) stats.textContent = 'Time: Rewind';
-  });
+  const timeControls = window.panelTimeControls;
+  if (timeControls) {
+    timeControls.btnNow.addEventListener('click', () => {
+      setSimulationTime(Date.now());
+      setSimulationRate(1);
+      timeControls.btnX1.classList.add('active');
+      [timeControls.btnX10, timeControls.btnX100, timeControls.btnX1000].forEach(button => button.classList.remove('active'));
+    });
+    [[timeControls.btnX1, 1], [timeControls.btnX10, 10],
+      [timeControls.btnX100, 100], [timeControls.btnX1000, 1000]].forEach(([button, rate]) => {
+      button.addEventListener('click', () => {
+        setSimulationRate(rate);
+        document.querySelectorAll('#panel-speed-content .btn-sm').forEach(item => item.classList.remove('active'));
+        button.classList.add('active');
+      });
+    });
+    timeControls.jumpInput.addEventListener('change', () => {
+      if (!timeControls.jumpInput.value) return;
+      setSimulationTime(new Date(timeControls.jumpInput.value).getTime());
+      setSimulationRate(1);
+      timeControls.btnX1.classList.add('active');
+      [timeControls.btnX10, timeControls.btnX100, timeControls.btnX1000].forEach(button => button.classList.remove('active'));
+    });
+  }
 
   // Center toolbar buttons
   const btnToggleSats = document.getElementById('btn-toggle-sats');
   if (btnToggleSats) {
+    btnToggleSats.setAttribute('aria-pressed', 'true');
     btnToggleSats.addEventListener('click', () => {
-      // Toggle all satellites on/off via globe
-      // (handled by globe.js setFilters / visibility)
-      btnToggleSats.classList.toggle('active');
+      const visible = btnToggleSats.getAttribute('aria-pressed') !== 'true';
+      btnToggleSats.setAttribute('aria-pressed', String(visible));
+      btnToggleSats.classList.toggle('active', visible);
+      setSatellitesVisible(visible);
     });
   }
   const btnToggleEarth = document.getElementById('btn-toggle-earth');
   if (btnToggleEarth) {
+    btnToggleEarth.setAttribute('aria-pressed', 'true');
     btnToggleEarth.addEventListener('click', () => {
-      btnToggleEarth.classList.toggle('active');
-      // Earth texture toggle – handled in globe.js if implemented
+      const visible = btnToggleEarth.getAttribute('aria-pressed') !== 'true';
+      btnToggleEarth.setAttribute('aria-pressed', String(visible));
+      btnToggleEarth.classList.toggle('active', visible);
+      setEarthVisible(visible);
     });
   }
 
@@ -285,9 +280,9 @@ function setupPanelTriggers() {
     if (!btn || !panel) continue;
 
     btn.addEventListener('click', () => {
-      // Close all other panels
+      const wasOpen = panel.classList.contains('visible');
       document.querySelectorAll('.glass-panel').forEach(p => p.classList.remove('visible'));
-      panel.classList.toggle('visible');
+      if (!wasOpen) panel.classList.add('visible');
     });
 
     if (closeBtn) {
@@ -296,6 +291,11 @@ function setupPanelTriggers() {
       });
     }
   }
+
+  document.querySelectorAll('.tab-btn').forEach(button => {
+    button.addEventListener('click', () => window.switchInfoTab?.(button.dataset.tab));
+  });
+  window.switchInfoTab?.('overview');
 
   // Click outside a panel closes it
   document.addEventListener('click', (e) => {
@@ -353,6 +353,33 @@ function updateHud(pos) {
   el('hud-height', `${(pos.altitude_km || 0).toFixed(0)} km`);
   el('hud-lat', `${(pos.latitude || 0).toFixed(2)}°`);
   el('hud-lon', `${(pos.longitude || 0).toFixed(2)}°`);
+  const timeLabel = pos.utc_time ? new Date(pos.utc_time).toLocaleTimeString() : '';
+  if (typeof window.addGraphPoint === 'function') {
+    window.addGraphPoint('graph-altitude', timeLabel, pos.altitude_km || 0);
+    window.addGraphPoint('graph-speed', timeLabel, pos.velocity_km_s || 0);
+    window.addGraphPoint('graph-lat', timeLabel, pos.latitude || 0);
+    window.addGraphPoint('graph-lon', timeLabel, pos.longitude || 0);
+  }
+}
+
+function setupPanelTheme() {
+  const button = document.getElementById('panel-theme-toggle');
+  if (!button) return;
+  const apply = light => {
+    document.body.classList.toggle('panels-light', light);
+    button.setAttribute('aria-pressed', String(light));
+    button.textContent = light ? 'Use dark panels' : 'Use light panels';
+    try { localStorage.setItem('orbit-tracker-panel-theme', light ? 'light' : 'dark'); } catch (_) {}
+  };
+  let light = false;
+  try { light = localStorage.getItem('orbit-tracker-panel-theme') === 'light'; } catch (_) {}
+  apply(light);
+  button.addEventListener('click', () => apply(!document.body.classList.contains('panels-light')));
+}
+
+function updateSimulationClock() {
+  const clock = document.getElementById('simulation-clock');
+  if (clock) clock.textContent = new Date(window.simulationTime || Date.now()).toUTCString().replace(' GMT', ' UTC');
 }
 
 // ==========================================================================
@@ -382,6 +409,8 @@ async function loadSatellite(noradId) {
     // Update info panel
     updatePositionPanel(pos);
     updateElementsPanel(elems);
+    const entry = getCatalog().find(item => Number(item.norad_id) === Number(noradId));
+    window.updateInfoPanel?.(entry, pos, elems);
 
     // Update bottom-left HUD
     updateHud(pos);
@@ -414,6 +443,8 @@ async function pollPosition() {
     const pos = await apiPosition(currentSatId);
     updateSatMarker(pos.latitude, pos.longitude, pos.altitude_km, pos.name);
     updatePositionPanel(pos);
+    const entry = getCatalog().find(item => Number(item.norad_id) === Number(currentSatId));
+    window.updateInfoPanel?.(entry, pos, null);
     updateHud(pos);
     addAltitudePoint(pos.utc_time, pos.altitude_km);
   } catch (err) {

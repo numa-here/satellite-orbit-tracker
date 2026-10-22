@@ -23,6 +23,7 @@ function updatePositionPanel(pos) {
 
   // Update status badge
   const badge = document.getElementById('status-badge');
+  if (!badge) return;
   if (pos.stale_tle) {
     badge.textContent = 'STALE';
     badge.className = 'badge badge-stale';
@@ -224,6 +225,8 @@ function renderInfoPanel(entry, pos, elems) {
   container.appendChild(dataRow('Perigee', entry && entry.perigee_km != null ? `${entry.perigee_km.toFixed(0)} km` : '—', 'Lowest point above Earth\'s surface.'));
 }
 
+window.renderInfoPanel = renderInfoPanel;
+
 /**
  * Populate the Speed / Time glass panel with time controls.
  */
@@ -277,6 +280,8 @@ function renderSpeedPanel() {
   };
 }
 
+window.renderSpeedPanel = renderSpeedPanel;
+
 /**
  * Populate the Graphs glass panel with empty Chart.js canvases.
  */
@@ -328,7 +333,12 @@ function renderGraphsPanel() {
   window.graphCharts = {};
   for (const m of metrics) {
     const canvas = document.getElementById(m.id);
-    if (!canvas || typeof Chart === 'undefined') continue;
+    if (!canvas) continue;
+    if (typeof Chart === 'undefined') {
+      window.graphCharts[m.id] = { canvas, color: m.color, values: [], labels: [] };
+      drawFallbackChart(window.graphCharts[m.id]);
+      continue;
+    }
     window.graphCharts[m.id] = new Chart(canvas, {
       type: 'line',
       data: { labels: [], datasets: [{ label: m.label, data: [], borderColor: m.color, backgroundColor: m.color + '20', borderWidth: 1.5, pointRadius: 0, fill: false, tension: 0.3 }] },
@@ -339,6 +349,8 @@ function renderGraphsPanel() {
   }
 }
 
+window.renderGraphsPanel = renderGraphsPanel;
+
 /**
  * Add a point to a graph chart.
  * @param {string} graphId - Canvas id (e.g. 'graph-altitude')
@@ -348,13 +360,50 @@ function renderGraphsPanel() {
 function addGraphPoint(graphId, label, value) {
   const chart = window.graphCharts && window.graphCharts[graphId];
   if (!chart) return;
-  chart.data.labels.push(label);
-  chart.data.datasets[0].data.push(value);
-  if (chart.data.labels.length > 60) {
-    chart.data.labels.shift();
-    chart.data.datasets[0].data.shift();
+  if (chart.data && chart.data.datasets) {
+    chart.data.labels.push(label);
+    chart.data.datasets[0].data.push(value);
+    if (chart.data.labels.length > 60) {
+      chart.data.labels.shift();
+      chart.data.datasets[0].data.shift();
+    }
+    chart.update('none');
+  } else {
+    chart.labels.push(label);
+    chart.values.push(value);
+    if (chart.values.length > 60) { chart.values.shift(); chart.labels.shift(); }
+    drawFallbackChart(chart);
   }
-  chart.update('none');
+}
+
+function drawFallbackChart(chart) {
+  const canvas = chart.canvas;
+  const rect = canvas.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.max(220, rect.width || 220);
+  const height = 120;
+  canvas.width = width * dpr; canvas.height = height * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  ctx.strokeStyle = 'rgba(150,170,195,.16)';
+  for (let y = 20; y <= 100; y += 40) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
+  }
+  if (chart.values.length < 2) {
+    ctx.fillStyle = 'rgba(150,170,195,.65)'; ctx.font = '12px system-ui';
+    ctx.fillText('Waiting for telemetry…', 10, 62);
+    return;
+  }
+  const min = Math.min(...chart.values), max = Math.max(...chart.values);
+  const span = max - min || 1;
+  ctx.strokeStyle = chart.color; ctx.lineWidth = 2; ctx.beginPath();
+  chart.values.forEach((value, index) => {
+    const x = 8 + index / (chart.values.length - 1) * (width - 16);
+    const y = height - 10 - (value - min) / span * (height - 24);
+    if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
 }
 
 /** Switch the info panel tabs */
@@ -404,6 +453,9 @@ function updateInfoPanel(entry, pos, elems) {
   }
 }
 
+window.updateInfoPanel = updateInfoPanel;
+window.switchInfoTab = switchInfoTab;
+
 /** Render graphs with orbit data */
 function renderGraphs(altitudes, speeds) {
   const container = document.getElementById('panel-graphs-content');
@@ -426,5 +478,4 @@ function renderGraphs(altitudes, speeds) {
 
 /* --- Helpers -------------------------------------------------------- */
 
-// Test insert
-/* End of panel.jS */
+window.addGraphPoint = addGraphPoint;
