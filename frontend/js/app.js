@@ -53,6 +53,15 @@ window.globeApp = {
 document.addEventListener('DOMContentLoaded', async () => {
   // 1. Create the 3D globe + Points layer
   initGlobe('globe-container');
+  // Wire the floating controls before any network requests. A slow catalog
+  // must not leave the visible buttons inert while the page is loading.
+  if (typeof window.renderSpeedPanel === 'function') window.renderSpeedPanel();
+  if (typeof window.renderGraphsPanel === 'function') window.renderGraphsPanel();
+  setupEventListeners();
+  setupPanelTheme();
+  updateSimulationClock();
+  window.setInterval(updateSimulationClock, 1000);
+  initAltitudeChart();
   showLoading('Connecting to backend…');
 
   // Initialize catalog UI (search + filters). catalog-ui owns the search
@@ -68,6 +77,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       // 'setSearch' here is globe.js's export (syncs text filter to the globe layer).
       setSearch(searchQuery);
     },
+  });
+  const searchInput = document.getElementById('catalog-search');
+  const searchDropdown = document.getElementById('search-dropdown');
+  searchInput?.addEventListener('focus', () => renderSearchDropdown(searchInput, searchDropdown, getCatalog()));
+  searchInput?.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && searchDropdown) searchDropdown.style.display = 'none';
+    if (event.key === 'Enter') searchDropdown?.querySelector('.result-item')?.click();
   });
 
   // 3. Check backend health (non-fatal - globe always renders even if catalog fails)
@@ -119,18 +135,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   } catch (err) {
     console.warn('Could not load satellite list, using defaults');
   }
-
-  // Build the icon-panel contents before wiring their controls.
-  if (typeof window.renderSpeedPanel === 'function') window.renderSpeedPanel();
-  if (typeof window.renderGraphsPanel === 'function') window.renderGraphsPanel();
-  // 6. Wire up UI events
-  setupEventListeners();
-  setupPanelTheme();
-  updateSimulationClock();
-  window.setInterval(updateSimulationClock, 1000);
-
-  // 7. Initialise chart
-  initAltitudeChart();
 
   // 8. Read shareable satellite from URL hash (#norad=25544)
   const hashMatch = location.hash.match(/#norad=(\d+)/);
@@ -305,33 +309,54 @@ function setupPanelTriggers() {
 
 // Render search autocomplete dropdown
 function renderSearchDropdown(input, dropdown, entries) {
+  if (!input || !dropdown) return;
   const q = input.value.toLowerCase().trim();
-  if (!q || !dropdown) { dropdown.style.display = 'none'; return; }
-  const matches = entries.filter(e => {
+  if (!q && document.activeElement !== input) { dropdown.style.display = 'none'; return; }
+  const catalog = getCatalog();
+  const matches = catalog.filter(e => {
     const haystack = [
       e.name || '', String(e.norad_id || ''), e.intl_designator || '',
       e.country || '', e.object_type || '',
     ].join(' ').toLowerCase();
     return haystack.includes(q);
-  }).slice(0, 8);
-
-  if (matches.length === 0) { dropdown.style.display = 'none'; return; }
-
-  dropdown.innerHTML = matches.map(e => `
-    <div class="result-item" data-norad="${e.norad_id}">
-      <div>${escapeHtml(e.name || 'Unknown')}</div>
-      <div class="result-norad">NORAD ${e.norad_id}</div>
-    </div>
-  `).join('');
-
-  dropdown.querySelectorAll('.result-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const noradId = parseInt(item.dataset.norad, 10);
-      input.value = '';
-      dropdown.style.display = 'none';
-      selectSatellite(noradId);
-    });
   });
+
+  if (matches.length === 0) {
+    dropdown.innerHTML = '<div class="result-summary">No matching satellites</div>';
+    dropdown.style.display = q ? 'block' : 'none';
+    return;
+  }
+
+  // Keep the list responsive for 20k objects while allowing scroll/search to
+  // reach every catalog row, not only a fixed handful of suggestions.
+  const pageSize = 60;
+  let shown = Math.min(pageSize, matches.length);
+  const render = () => {
+    const noun = q ? 'match' : 'in catalog';
+    dropdown.innerHTML = `<div class="result-summary">${matches.length.toLocaleString()} satellites ${noun} · showing ${shown.toLocaleString()}</div>` +
+      matches.slice(0, shown).map(e => `
+        <button type="button" class="result-item" data-norad="${e.norad_id}">
+          <span>${escapeHtml(e.name || 'Unknown')}</span>
+          <span class="result-norad">NORAD ${e.norad_id}</span>
+        </button>
+      `).join('');
+    dropdown.querySelectorAll('.result-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const noradId = parseInt(item.dataset.norad, 10);
+        const entry = catalog.find(sat => Number(sat.norad_id) === noradId);
+        input.value = entry?.name || String(noradId);
+        dropdown.style.display = 'none';
+        selectSatellite(noradId);
+      });
+    });
+  };
+  dropdown.onscroll = () => {
+    if (shown < matches.length && dropdown.scrollTop + dropdown.clientHeight >= dropdown.scrollHeight - 32) {
+      shown = Math.min(shown + pageSize, matches.length);
+      render();
+    }
+  };
+  render();
 
   dropdown.style.display = 'block';
 }

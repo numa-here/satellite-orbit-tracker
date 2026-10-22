@@ -11,11 +11,7 @@
  *   { type: 'POSITIONS', positions, colors, sizes, valid }
  */
 
-try {
-  importScripts('https://cdn.jsdelivr.net/npm/satellite.js@6.0.2/dist/satellite.min.js');
-} catch (primaryError) {
-  importScripts('https://unpkg.com/satellite.js@6.0.2/dist/satellite.min.js');
-}
+importScripts('/vendor/satellite.min.js');
 
 const EARTH_RADIUS_KM = 6371.0;
 let catalog = [];

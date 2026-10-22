@@ -263,36 +263,5 @@ if (FRONTEND_DIR / "css").is_dir():
 if (FRONTEND_DIR / "js").is_dir():
     app.mount("/js", StaticFiles(directory=FRONTEND_DIR / "js"), name="js")
 
-@app.get(
-    "/api/catalog",
-    summary="Get satellite catalog with pagination",
-    tags=["Catalog"],
-)
-async def catalog_api(
-    limit: int = Query(default=None, ge=1, le=100000, description="Maximum number of objects to return"),
-    offset: int = Query(default=0, ge=0, description="Number of objects to skip"),
-    refresh: bool = Query(False, description="Refresh the catalog from upstream sources"),
-):
-    """Get satellite catalog with pagination support.
-
-    Returns compact satellite data suitable for Three.js satellite.js propagation.
-    Uses the 5-tier fallback chain: KeepTrack → CelesTrak → cache → seed data.
-    """
-    # Use the catalog service's cache and upstream/seed fallback chain. Calling
-    # build_catalog directly bypassed that logic and referenced an unimported
-    # function, leaving the browser with an empty catalog.
-    catalog = get_catalog(force_refresh=refresh)
-    objects = catalog.get("objects", [])
-    effective_limit = min(limit if limit is not None else len(objects), 100000)
-    page = objects[offset:offset + effective_limit]
-    return JSONResponse(
-        content={
-            "objects": page,
-            "count": len(page),
-            "total_count": catalog.get("total_count", len(objects)),
-            "sources": catalog.get("sources", [catalog.get("source", "unknown")]),
-            "limit": effective_limit,
-            "offset": offset,
-        },
-        media_type="application/json",
-    )
+if (FRONTEND_DIR / "vendor").is_dir():
+    app.mount("/vendor", StaticFiles(directory=FRONTEND_DIR / "vendor"), name="vendor")

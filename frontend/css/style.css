@@ -595,11 +595,22 @@ html, body {
 }
 
 .search-dropdown .result-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 8px 12px;
   font-size: 0.85rem;
   color: var(--text);
   cursor: pointer;
   border-bottom: 1px solid #1e2a3a40;
+  background: transparent;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  text-align: left;
+  font-family: inherit;
 }
 
 .search-dropdown .result-item:hover {
@@ -610,6 +621,16 @@ html, body {
   color: var(--text-dim);
   font-size: 0.75rem;
   font-family: var(--font-mono);
+}
+
+.search-dropdown .result-summary {
+  position: sticky;
+  top: 0;
+  padding: 7px 12px;
+  color: var(--text-dim);
+  background: #151928;
+  border-bottom: 1px solid var(--panel-border);
+  font-size: 0.72rem;
 }
 
 #catalog-count {

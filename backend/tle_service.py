@@ -109,6 +109,23 @@ def fetch_satellite_by_norad(norad_id: int) -> Dict[str, Any]:
         logger.debug("Serving NORAD %d from fresh cache", norad_id)
         return {"data": cached["data"], "stale": False, "cached": True}
 
+    # The catalog already contains the same current OMM data used to plot the
+    # selected object. Reuse it for info/position requests instead of making a
+    # second CelesTrak round trip for every click in the search list.
+    catalog_cache = _read_cache("catalog_v1")
+    catalog_data = (catalog_cache or {}).get("data", {})
+    if catalog_cache and _is_fresh(catalog_cache) and isinstance(catalog_data, dict):
+        for entry in catalog_data.get("objects", []):
+            if not isinstance(entry, dict) or int(entry.get("norad_id") or 0) != norad_id:
+                continue
+            omm = entry.get("omm")
+            if isinstance(omm, dict) and omm.get("MEAN_MOTION") is not None:
+                sat_data = dict(omm)
+                sat_data.setdefault("NORAD_CAT_ID", norad_id)
+                sat_data.setdefault("OBJECT_NAME", entry.get("name", "UNKNOWN"))
+                _write_cache(cache_key, sat_data)
+                return {"data": sat_data, "stale": bool(entry.get("stale")), "cached": True}
+
     # Attempt network fetch across candidate endpoints (with 5s connect timeout)
     last_network_exc = None
     for endpoint in CELESTRAK_ENDPOINTS:
@@ -177,7 +194,9 @@ def fetch_group(group: str) -> Dict[str, Any]:
     for endpoint in CELESTRAK_ENDPOINTS:
         url = f"{endpoint}?GROUP={clean_group}&FORMAT=JSON"
         try:
-            resp = requests.get(url, headers=REQUEST_HEADERS, timeout=(5, 8))
+            # Bound the wait for unreachable hosted networks; catalog groups
+            # are fetched concurrently by catalog_service.
+            resp = requests.get(url, headers=REQUEST_HEADERS, timeout=(3, 5))
             text = resp.text.strip()
             if resp.status_code == 404 or "No GP data found" in text or not text:
                 raise ValueError(f"Group '{group}' not found on CelesTrak")
@@ -196,13 +215,6 @@ def fetch_group(group: str) -> Dict[str, Any]:
 
     if cached:
         return {"data": cached["data"], "stale": True, "cached": True}
-
-    # If no group cache, construct list from matching seed satellites
-    group_seeds = [
-        sat for sat in SEED_SATELLITES.values()
-    ]
-    if group_seeds:
-        return {"data": group_seeds, "stale": True, "cached": True}
 
     raise ConnectionError(
         f"Cannot reach CelesTrak and no cache exists for group '{group}'"

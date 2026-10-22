@@ -2,12 +2,13 @@
 Full catalog service.
 
 Merges satellite catalog data from KeepTrack (priority) and CelesTrak GP groups,
-enriches from CelesTrak SATCAT, and serves a compact, cached /api/catalog payload.
-All external calls are cached on disk; nothing is fetched per page load.
+uses cached CelesTrak SATCAT metadata when available, and serves a compact,
+cached /api/catalog payload.
 """
 import json
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -17,11 +18,9 @@ from .config import (
     CELESTRAK_GP_GROUPS,
     KEEPTRACK_API_KEY,
     KEEPTRACK_BASE_URL,
-    SATCAT_CACHE_TTL_SECONDS,
-    SATCAT_URL,
 )
 from .schemas import CatalogEntry, CatalogError
-from .tle_service import _is_fresh, _read_cache, _write_cache, fetch_group
+from .tle_service import _read_cache, _write_cache, fetch_group
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +235,13 @@ def _merge_satcat(entry: CatalogEntry, meta: Optional[Dict[str, Any]]) -> None:
         entry.rcs_m2 = _safe_float(meta.get("RCS"))
 
 
+def _fetch_satcat() -> Dict[int, Dict[str, Any]]:
+    """Return cached SATCAT enrichment without blocking on a bulk network fetch."""
+    cached = _read_cache("satcat_all_v1")
+    data = (cached or {}).get("data", {})
+    return data if isinstance(data, dict) else {}
+
+
 def _fetch_keeptrack_brief() -> List[Dict[str, Any]]:
     if not KEEPTRACK_API_KEY:
         logger.info("KeepTrack API key not configured; skipping KeepTrack catalog source")
@@ -268,32 +274,6 @@ def _fetch_keeptrack_brief() -> List[Dict[str, Any]]:
     return []
 
 
-def _fetch_satcat() -> Dict[int, Dict[str, Any]]:
-    cache_key = "satcat_all_v1"
-    cached = _read_cache(cache_key)
-    if cached and _is_fresh_ttl(cached, SATCAT_CACHE_TTL_SECONDS):
-        return cached.get("data", {})
-
-    mapping: Dict[int, Dict[str, Any]] = {}
-    try:
-        resp = requests.get(SATCAT_URL, headers=REQUEST_HEADERS, timeout=(15, 40))
-        resp.raise_for_status()
-        payload = resp.json()
-        records = payload if isinstance(payload, list) else (payload.get("records") or [])
-        for record in records:
-            if not isinstance(record, dict):
-                continue
-            norad = _safe_int(record.get("NORAD_CAT_ID"))
-            if norad is not None:
-                mapping[norad] = record
-        _write_cache(cache_key, {"timestamp": time.time(), "data": mapping})
-    except Exception as exc:
-        logger.warning("SATCAT fetch failed: %s", exc)
-        if cached:
-            return cached.get("data", {})
-    return mapping
-
-
 def _entry_to_compact(entry: CatalogEntry) -> Dict[str, Any]:
     """Convert a CatalogEntry to a compact dict for JSON transfer.
 
@@ -307,7 +287,16 @@ def _entry_to_compact(entry: CatalogEntry) -> Dict[str, Any]:
         "object_type": entry.object_type,
         "category": entry.category,
         "country": entry.country,
+        "launch_date": entry.launch_date,
+        "launch_site": entry.launch_site,
+        "intl_designator": entry.intl_designator,
+        "orbit_class": entry.orbit_class,
+        "orbit_regime": entry.orbit_regime,
+        "period_minutes": entry.period_minutes,
+        "decay_date": entry.decay_date,
+        "rcs_m2": entry.rcs_m2,
         "group": entry.group,
+        "source": entry.source,
         "stale": entry.stale,
         "line1": entry.line1,
         "line2": entry.line2,
@@ -338,27 +327,52 @@ def build_catalog() -> Dict[str, Any]:
         if entry:
             items[entry.norad_id] = entry
 
-    # 2. CelesTrak GP groups; skip groups that fail rather than aborting the catalog
+    # 2. Fetch groups concurrently so unreachable feeds don't cause sequential
+    # timeouts that leave hosted users staring at an empty loading screen.
     celestrak_ok = False
-    for group in CELESTRAK_GP_GROUPS:
-        try:
-            result = fetch_group(group)
-        except Exception as exc:
-            logger.warning("CelesTrak group '%s' unavailable: %s", group, exc)
-            continue
-        celestrak_ok = True
-        sat_list = result.get("data") if isinstance(result, dict) else result
-        if not isinstance(sat_list, list):
-            continue
-        for sat_data in sat_list:
-            entry = _normalize_omm(sat_data, group)
-            if entry and entry.norad_id not in items:
-                items[entry.norad_id] = entry
+    celestrak_present = False
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(CELESTRAK_GP_GROUPS)))) as pool:
+        futures = {pool.submit(fetch_group, group): group for group in CELESTRAK_GP_GROUPS}
+        for future in as_completed(futures):
+            group = futures[future]
+            try:
+                result = future.result()
+            except Exception as exc:
+                logger.warning("CelesTrak group '%s' unavailable: %s", group, exc)
+                continue
+            sat_list = result.get("data") if isinstance(result, dict) else result
+            if not isinstance(sat_list, list):
+                continue
+            if sat_list:
+                celestrak_present = True
+            if sat_list and not (isinstance(result, dict) and result.get("stale")):
+                celestrak_ok = True
+            for sat_data in sat_list:
+                entry = _normalize_omm(sat_data, group)
+                if entry and entry.norad_id not in items:
+                    items[entry.norad_id] = entry
 
-    if celestrak_ok:
+    # Fresh upstream entries take precedence; bundled OMMs keep the app usable
+    # when all public feeds are unreachable.
+    from .seed_data import SEED_SATELLITES
+    seed_used = False
+    if not items:
+        for norad_id, sat_data in SEED_SATELLITES.items():
+            entry = _normalize_omm(sat_data, "seed")
+            if entry:
+                entry.source = "seed"
+                entry.stale = True
+                items[norad_id] = entry
+                seed_used = True
+
+    if celestrak_present:
         sources.append("celestrak")
+    if seed_used:
+        sources.append("seed")
 
     # 3. SATCAT enrichment for all merged NORAD IDs
+    # SATCAT is optional enrichment and can be a large request. Use a warmed
+    # cache only so metadata lookup never delays the first catalog response.
     satcat = _fetch_satcat()
     for entry in items.values():
         _merge_satcat(entry, satcat.get(entry.norad_id))
@@ -384,6 +398,7 @@ def build_catalog() -> Dict[str, Any]:
         "count": len(compact_objects),
         "total_count": total,
         "sources": sources,
+        "stale": not celestrak_ok and "keeptrack" not in sources,
         "updated_at": time.time(),
         "limit": effective_limit,
         "offset": offset,
@@ -408,7 +423,7 @@ def get_catalog(force_refresh: bool = False) -> Dict[str, Any]:
     ):
         data = dict(cached_data)
         data["cached"] = True
-        data["stale"] = False
+        data["stale"] = bool(data.get("stale"))
         # Ensure source field is set
         if "source" not in data:
             data["source"] = "cache"
@@ -420,7 +435,7 @@ def get_catalog(force_refresh: bool = False) -> Dict[str, Any]:
             raise CatalogError("Upstream providers returned an empty satellite catalog")
         _write_cache(cache_key, {"timestamp": time.time(), "data": data})
         data["cached"] = False
-        data["stale"] = False
+        data["stale"] = bool(data.get("stale"))
         # Ensure source field is set
         if "source" not in data:
             data["source"] = ", ".join(data.get("sources", [])) or "celestrak"
