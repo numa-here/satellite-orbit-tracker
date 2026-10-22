@@ -436,13 +436,13 @@ function updateInfoPanel(entry, pos, elems) {
     document.getElementById('info-status').className = 'info-value ' + (entry.stale ? 'stale' : 'live');
   }
   if (pos) {
-    document.getElementById('info-lat').textContent = pos.latitude.toFixed(4) + '°';
-    document.getElementById('info-lon').textContent = pos.longitude.toFixed(4) + '°';
-    document.getElementById('info-alt').textContent = pos.altitude_km.toFixed(2) + ' km';
-    document.getElementById('info-speed').textContent = pos.velocity_km_s.toFixed(3) + ' km/s';
-    document.getElementById('info-heading').textContent = pos.heading_degrees.toFixed(1) + '° ' + pos.direction;
+    document.getElementById('info-lat').textContent = formatNumber(pos.latitude, 4, '°');
+    document.getElementById('info-lon').textContent = formatNumber(pos.longitude, 4, '°');
+    document.getElementById('info-alt').textContent = formatNumber(pos.altitude_km, 2, ' km');
+    document.getElementById('info-speed').textContent = formatNumber(pos.velocity_km_s, 3, ' km/s');
+    document.getElementById('info-heading').textContent = `${formatNumber(pos.heading_degrees, 1, '°')}${pos.direction ? ` ${pos.direction}` : ''}`;
     document.getElementById('info-epoch').textContent = formatUTC(pos.tle_epoch);
-    document.getElementById('info-age').textContent = pos.tle_age_days.toFixed(1) + ' days';
+    document.getElementById('info-age').textContent = formatNumber(pos.tle_age_days, 1, ' days');
   }
   if (elems) {
     document.getElementById('info-inc').textContent = formatNumber(elems.inclination_deg, 4, '°');
