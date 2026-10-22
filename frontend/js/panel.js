@@ -357,7 +357,74 @@ function addGraphPoint(graphId, label, value) {
   chart.update('none');
 }
 
+/** Switch the info panel tabs */
+function switchInfoTab(tabId) {
+  const tabContents = document.querySelectorAll('.panel-tab-content');
+  tabContents.forEach(content => content.style.display = 'none');
+  const tabBtns = document.querySelectorAll('.tab-btn');
+  tabBtns.forEach(btn => btn.classList.remove('active'));
+  const selectedContent = document.getElementById('tab-' + tabId);
+  if (selectedContent) selectedContent.style.display = 'block';
+  const activeBtn = document.querySelector('.tab-btn[data-tab="' + tabId + '"]');
+  if (activeBtn) activeBtn.classList.add('active');
+}
+
+/** Populate the info panel with satellite data */
+function updateInfoPanel(entry, pos, elems) {
+  if (entry) {
+    document.getElementById('info-norad').textContent = entry.norad_id || '—';
+    document.getElementById('info-desig').textContent = entry.intl_designator || '—';
+    document.getElementById('info-country').textContent = entry.country || '—';
+    document.getElementById('info-type').textContent = (entry.object_type || 'UNK').replace(/_/g, ' ') || '—';
+    document.getElementById('info-launch-date').textContent = entry.launch_date || '—';
+    document.getElementById('info-launch-site').textContent = entry.launch_site || '—';
+    const status = entry.stale ? 'STALE' : 'LIVE';
+    document.getElementById('info-status').textContent = status;
+    document.getElementById('info-status').className = 'info-value ' + (entry.stale ? 'stale' : 'live');
+  }
+  if (pos) {
+    document.getElementById('info-lat').textContent = pos.latitude.toFixed(4) + '°';
+    document.getElementById('info-lon').textContent = pos.longitude.toFixed(4) + '°';
+    document.getElementById('info-alt').textContent = pos.altitude_km.toFixed(2) + ' km';
+    document.getElementById('info-speed').textContent = pos.velocity_km_s.toFixed(3) + ' km/s';
+    document.getElementById('info-heading').textContent = pos.heading_degrees.toFixed(1) + '° ' + pos.direction;
+    document.getElementById('info-epoch').textContent = formatUTC(pos.tle_epoch);
+    document.getElementById('info-age').textContent = pos.tle_age_days.toFixed(1) + ' days';
+  }
+  if (elems) {
+    document.getElementById('info-inc').textContent = elems.inclination_deg.toFixed(4) + '°';
+    document.getElementById('info-ecc').textContent = elems.eccentricity.toFixed(7);
+    document.getElementById('info-raan').textContent = elems.raan_deg.toFixed(4) + '°';
+    document.getElementById('info-argp').textContent = elems.arg_of_perigee_deg.toFixed(4) + '°';
+    document.getElementById('info-ma').textContent = elems.mean_anomaly_deg.toFixed(4) + '°';
+    document.getElementById('info-mm').textContent = elems.mean_motion_rev_per_day.toFixed(8) + ' rev/day';
+    document.getElementById('info-period').textContent = elems.orbital_period_minutes.toFixed(2) + ' min';
+    document.getElementById('info-apogee').textContent = elems.apogee_km.toFixed(1) + ' km';
+    document.getElementById('info-perigee').textContent = elems.perigee_km.toFixed(1) + ' km';
+  }
+}
+
+/** Render graphs with orbit data */
+function renderGraphs(altitudes, speeds) {
+  const container = document.getElementById('panel-graphs-content');
+  if (!container) return;
+  const labels = [];
+  for (let i = 0; i < 60; i++) labels.push(i);
+  const altChart = window.graphCharts && window.graphCharts['graph-altitude'];
+  if (altChart) {
+    altChart.data.labels = labels;
+    altChart.data.datasets[0].data = altitudes || Array(60).fill(0);
+    altChart.update('none');
+  }
+  const speedChart = window.graphCharts && window.graphCharts['graph-speed'];
+  if (speedChart) {
+    speedChart.data.labels = labels;
+    speedChart.data.datasets[0].data = speeds || Array(60).fill(0);
+    speedChart.update('none');
+  }
+}
+
 /* --- Helpers -------------------------------------------------------- */
 
 // Test insert
-/* End of panel.js */
+/* End of panel.jS */

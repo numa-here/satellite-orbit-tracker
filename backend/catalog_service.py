@@ -294,6 +294,34 @@ def _fetch_satcat() -> Dict[int, Dict[str, Any]]:
     return mapping
 
 
+def _entry_to_compact(entry: CatalogEntry) -> Dict[str, Any]:
+    """Convert a CatalogEntry to a compact dict for JSON transfer.
+
+    Keeps only the fields needed for Three.js satellite.js propagation:
+    orbital elements + basic identity. All other SATCAT metadata is
+    available on-demand via the /api/satellite/{norad_id} endpoint.
+    """
+    return {
+        "norad_id": entry.norad_id,
+        "name": entry.name,
+        "object_type": entry.object_type,
+        "category": entry.category,
+        "country": entry.country,
+        "group": entry.group,
+        "stale": entry.stale,
+        # Orbital elements for satellite.js propagation
+        "inclination_deg": entry.inclination_deg,
+        "mean_motion": _safe_float(entry.omm.get("MEAN_MOTION")) if entry.omm else None,
+        "mean_anomaly_deg": _safe_float(entry.omm.get("MEAN_ANOMALY")) if entry.omm else None,
+        "arg_of_perigee_deg": _safe_float(entry.omm.get("ARG_OF_PERIGEE")) if entry.omm else None,
+        "ra_of_asc_node_deg": _safe_float(entry.omm.get("RA_OF_ASC_NODE")) if entry.omm else None,
+        "epoch": _safe_float(entry.omm.get("EPOCH")) if entry.omm else None,
+        # SATCAT fields
+        "apogee_km": _safe_float(entry.omm.get("APOGEE")) if entry.omm else None,
+        "perigee_km": _safe_float(entry.omm.get("PERIGEE")) if entry.omm else None,
+    }
+
+
 def build_catalog() -> Dict[str, Any]:
     items: Dict[int, CatalogEntry] = {}
     sources: List[str] = []
@@ -334,12 +362,28 @@ def build_catalog() -> Dict[str, Any]:
         entry.category = _category(entry)
         entry.orbit_regime = _orbit_regime(entry)
 
-    objects = sorted(items.values(), key=lambda e: e.norad_id)
+    # 4. Pagination + compact serialization
+    all_objects = sorted(items.values(), key=lambda e: e.norad_id)
+    total = len(all_objects)
+
+    effective_limit = limit or CATALOG_MAX_OBJECTS
+    if effective_limit is None:
+        effective_limit = total
+    elif effective_limit < 0:
+        effective_limit = 0
+    upper = min(offset + effective_limit, total)
+    paged_objects = all_objects[offset:upper]
+
+    compact_objects = [_entry_to_compact(entry) for entry in paged_objects]
+
     return {
-        "objects": [entry.model_dump() for entry in objects],
-        "count": len(objects),
+        "objects": compact_objects,
+        "count": len(compact_objects),
+        "total_count": total,
         "sources": sources,
         "updated_at": time.time(),
+        "limit": effective_limit,
+        "offset": offset,
     }
 
 
@@ -351,6 +395,9 @@ def get_catalog(force_refresh: bool = False) -> Dict[str, Any]:
         data = cached.get("data", {})
         data["cached"] = True
         data["stale"] = False
+        # Ensure source field is set
+        if "source" not in data:
+            data["source"] = "cache"
         return data
 
     try:
@@ -358,6 +405,9 @@ def get_catalog(force_refresh: bool = False) -> Dict[str, Any]:
         _write_cache(cache_key, {"timestamp": time.time(), "data": data})
         data["cached"] = False
         data["stale"] = False
+        # Ensure source field is set
+        if "source" not in data:
+            data["source"] = ", ".join(data.get("sources", [])) or "celestrak"
         return data
     except Exception as exc:
         logger.exception("Catalog build failed")
@@ -365,5 +415,38 @@ def get_catalog(force_refresh: bool = False) -> Dict[str, Any]:
             data = cached.get("data", {})
             data["cached"] = True
             data["stale"] = True
+            # Ensure source field is set
+            if "source" not in data:
+                data["source"] = cached.get("source", "cache")
             return data
-        raise CatalogError(f"Unable to build satellite catalog: {exc}") from exc
+        # Fallback to seed data when everything else fails
+        try:
+            from .seed_data import SEED_SATELLITES
+            objects = []
+            for norad_id, sat_data in SEED_SATELLITES.items():
+                entry = CatalogEntry(
+                    norad_id=norad_id,
+                    name=sat_data.get("OBJECT_NAME", "Unknown"),
+                    object_type=sat_data.get("object_type", "UNK"),
+                    category=sat_data.get("category", "unknown"),
+                    country=sat_data.get("country", "unknown"),
+                    orbit_regime=sat_data.get("orbit_regime", "unknown"),
+                    latitude=sat_data.get("latitude", 0.0),
+                    longitude=sat_data.get("longitude", 0.0),
+                    altitude_km=sat_data.get("altitude_km", 0.0),
+                    inclination_deg=sat_data.get("inclination_deg", 0.0),
+                    source="Seed",
+                    stale=True,
+                )
+                objects.append(entry)
+            catalog_objects = sorted(objects, key=lambda e: e.norad_id)
+            return {
+                "objects": [entry.model_dump() for entry in catalog_objects],
+                "count": len(catalog_objects),
+                "source": "Seed",
+                "stale": True,
+                "updated_at": time.time(),
+            }
+        except Exception as e2:
+            logger.error("Seed data fallback also failed: %s", e2)
+            raise CatalogError(f"Unable to build satellite catalog: {exc}") from exc

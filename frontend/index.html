@@ -1,3 +1,15 @@
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const tabBtns = document.querySelectorAll('.tab-btn');
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tabId = btn.dataset.tab;
+      switchInfoTab(tabId);
+    });
+  });
+  switchInfoTab('overview');
+});
+</script>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -23,6 +35,8 @@
         <button class="icon-btn" id="btn-refresh" title="Refresh catalog">↻</button>
         <button class="icon-btn" id="btn-undo" title="Undo camera/selection">↩</button>
         <button class="icon-btn" id="btn-redo" title="Redo camera/selection">↪</button>
+        <button class="icon-btn" id="btn-zoom-in" title="Zoom in">+</button>
+        <button class="icon-btn" id="btn-zoom-out" title="Zoom out">-</button>
       </div>
 
       <div class="header-actions">
@@ -42,6 +56,8 @@
       <div id="catalog-count" class="catalog-count">
         Showing <span id="count-shown">0</span> of <span id="count-total">0</span>
       </div>
+      <div id="category-legend" class="category-legend"></div>
+</div>
     </div>
 
     <!-- Top-right floating panel triggers -->
@@ -89,7 +105,48 @@
     <div class="glass-panel" id="panel-settings">
       <button class="panel-close" id="close-panel-settings">&times;</button>
       <h3 class="panel-title">Settings</h3>
+    </div>
+    <div class="glass-panel" id="panel-speed">
+      <button class="panel-close" id="close-panel-speed">&times;</button>
+      <h3 class="panel-title">Speed Controls</h3>
+      <div class="speed-controls">
+        <button class="speed-btn" data-speed="1">x1</button>
+        <button class="speed-btn" data-speed="10">x10</button>
+        <button class="speed-btn" data-speed="100">x100</button>
+        <button class="speed-btn" data-speed="1000">x1000</button>
+        <button id="speed-pause" class="speed-btn">⏸️ Pause</button>
+        <button id="speed-now" class="speed-btn">Now</button>
+        <button id="speed-jump" class="speed-btn">Date…</button>
+        <input type="date" id="jump-date" class="speed-input" style="margin:0 8px; width:120px;">
+      </div>
+    </div>
       <div class="filter-section">
+        <div id="category-filters" class="filter-chip-group"></div>
+        <div id="orbit-filters" class="filter-chip-group"></div>
+        <div id="type-filters" class="filter-chip-group"></div>
+        <div id="country-filters" class="filter-chip-group"></div>
+      </div>
+    </div>
+    <div class="glass-panel" id="panel-speed">
+      <button class="panel-close" id="close-panel-speed">&times;</button>
+      <h3 class="panel-title">Speed Controls</h3>
+      <div class="speed-controls">
+        <button class="speed-btn" data-speed="1">x1</button>
+        <button class="speed-btn" data-speed="10">x10</button>
+        <button class="speed-btn" data-speed="100">x100</button>
+        <button class="speed-btn" data-speed="1000">x1000</button>
+        <button id="speed-pause" class="speed-btn">⏸️ Pause</button>
+        <button id="speed-now" class="speed-btn">Now</button>
+        <button id="speed-jump" class="speed-btn">Date…</button>
+        <input type="date" id="jump-date" class="speed-input" style="margin:0 8px; width:120px;">
+      </div>
+    </div>
+      <div class="filter-section">
+        <div id="category-filters" class="filter-chip-group"></div>
+        <div id="orbit-filters" class="filter-chip-group"></div>
+        <div id="type-filters" class="filter-chip-group"></div>
+        <div id="country-filters" class="filter-chip-group"></div>
+      </div>
         <h4>Category</h4>
         <div class="filter-chips" id="category-filters"></div>
       </div>
@@ -104,6 +161,133 @@
       <div class="filter-section">
         <h4>Catalog</h4>
         <div id="category-legend"></div>
+      </div>
+    </div>
+
+    <div class="glass-panel" id="panel-info">
+      <button class="panel-close" id="close-panel-info">&times;</button>
+      <h3 class="panel-title">Satellite Info</h3>
+      <div class="panel-tabs">
+        <button class="tab-btn active" data-tab="overview">Overview</button>
+        <button class="tab-btn" data-tab="live">Live Data</button>
+        <button class="tab-btn" data-tab="orbit">Orbit</button>
+        <button class="tab-btn" data-tab="graphs">Graphs</button>
+      </div>
+      <div class="panel-tab-content" id="tab-overview">
+        <div class="info-grid">
+          <div class="info-row">
+            <span class="info-label">NORAD ID</span>
+            <span class="info-value" id="info-norad"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">International Designator</span>
+            <span class="info-value" id="info-desig"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Country</span>
+            <span class="info-value" id="info-country"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Object Type</span>
+            <span class="info-value" id="info-type"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Launch Date</span>
+            <span class="info-value" id="info-launch-date"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Launch Site</span>
+            <span class="info-value" id="info-launch-site"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Status</span>
+            <span class="info-value" id="info-status"></span>
+          </div>
+        </div>
+      </div>
+      <div class="panel-tab-content" id="tab-live">
+        <div class="info-grid">
+          <div class="info-row">
+            <span class="info-label">Latitude</span>
+            <span class="info-value" id="info-lat"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Longitude</span>
+            <span class="info-value" id="info-lon"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Altitude</span>
+            <span class="info-value" id="info-alt"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Speed</span>
+            <span class="info-value" id="info-speed"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Heading</span>
+            <span class="info-value" id="info-heading"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">TLE Epoch</span>
+            <span class="info-value" id="info-epoch"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">TLE Age</span>
+            <span class="info-value" id="info-age"></span>
+          </div>
+        </div>
+      </div>
+      <div class="panel-tab-content" id="tab-orbit">
+        <div class="info-grid">
+          <div class="info-row">
+            <span class="info-label">Inclination</span>
+            <span class="info-value" id="info-inc"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Eccentricity</span>
+            <span class="info-value" id="info-ecc"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">RAAN</span>
+            <span class="info-value" id="info-raan"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Arg of Perigee</span>
+            <span class="info-value" id="info-argp"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Mean Anomaly</span>
+            <span class="info-value" id="info-ma"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Mean Motion</span>
+            <span class="info-value" id="info-mm"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Orbital Period</span>
+            <span class="info-value" id="info-period"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Apogee</span>
+            <span class="info-value" id="info-apogee"></span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Perigee</span>
+            <span class="info-value" id="info-perigee"></span>
+          </div>
+        </div>
+      </div>
+      <div class="panel-tab-content" id="tab-graphs">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px;">
+          <div style="background:#1a1e2e;border:1px solid var(--panel-border);border-radius:8px;padding:10px;">
+            <div style="font-size:0.7rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Altitude (km)</div>
+            <canvas id="graph-altitude" height="120"></canvas>
+          </div>
+          <div style="background:#1a1e2e;border:1px solid var(--panel-border);border-radius:8px;padding:10px;">
+            <div style="font-size:0.7rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Speed (km/s)</div>
+            <canvas id="graph-speed" height="120"></canvas>
+          </div>
+        </div>
       </div>
     </div>
 

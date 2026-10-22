@@ -32,12 +32,14 @@ const filters = {
   category: new Set(),
   regime: new Set(),
   objectType: new Set(),
+  country: new Set(),
 };
 
 const FILTER_CONTAINERS = [
   { id: 'category-filters', type: 'category' },
   { id: 'orbit-filters', type: 'regime' },
   { id: 'type-filters', type: 'objectType' },
+  { id: 'country-filters', type: 'country' },
 ];
 
 const CATEGORY_CONFIG = {
