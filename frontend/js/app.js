@@ -218,11 +218,14 @@ function setupEventListeners() {
   const btnToggleSats = document.getElementById('btn-toggle-sats');
   if (btnToggleSats) {
     btnToggleSats.setAttribute('aria-pressed', 'true');
+    btnToggleSats.classList.add('active');
+    console.log('[app.js] Satellite toggle initialized: ON');
     btnToggleSats.addEventListener('click', () => {
       const visible = btnToggleSats.getAttribute('aria-pressed') !== 'true';
       btnToggleSats.setAttribute('aria-pressed', String(visible));
       btnToggleSats.classList.toggle('active', visible);
       setSatellitesVisible(visible);
+      console.log(`[app.js] Satellite toggle: ${visible ? 'ON' : 'OFF'}`);
     });
   }
   const btnToggleEarth = document.getElementById('btn-toggle-earth');

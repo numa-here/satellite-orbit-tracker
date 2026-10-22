@@ -48,16 +48,17 @@ export function initGlobe(containerId) {
       .pointColor(d => d.color)
       .pointRadius(d => d.radius)
       .pointLabel(d => `${d.entry?.name || d.name || 'Satellite'} · NORAD ${d.norad_id || ''}`)
-      .pointResolution(8)
+      .pointResolution(12)
       .pointsMerge(false)
+      .pointAltitude(0.02)
       .pathsData([])
       .pathPoints(d => d.points)
       .pathPointLat(d => d.lat)
       .pathPointLng(d => d.lng)
       .pathPointAlt(d => d.alt)
-      .pathColor(path => path.selected ? '#8aff4d' : path.color)
+      .pathColor(path => path.selected ? '#00ff00' : '#00ff00')
       .pathLabel(path => `${path.name} · NORAD ${path.norad_id} · moving in the direction of the animated dashes`)
-      .pathStroke(path => path.selected ? 0.9 : 0.36)
+      .pathStroke(path => path.selected ? 2.0 : 1.2)
       .pathDashLength(0.012)
       .pathDashGap(0.008)
       .pathDashAnimateTime(9000)
@@ -108,7 +109,7 @@ export function initGlobe(containerId) {
     controls.autoRotateSpeed = 0.3;
     controls.minDistance = 1.02;
     controls.maxDistance = 12;
-    const initialView = { lat: 20, lng: 0, altitude: 1.45 };
+    const initialView = { lat: 20, lng: 0, altitude: 2.2 };
     globe.pointOfView(initialView, 0);
     cameraHistory = [initialView];
     cameraHistoryIndex = 0;
@@ -117,6 +118,7 @@ export function initGlobe(containerId) {
       globe = null;
       showGlobeError('The 3D globe could not initialize. Enable WebGL or try a browser with hardware acceleration.');
     }
+    console.log('[globe.js] Globe initialization complete, globe object:', !!globe);
   }
 
   try {
@@ -142,14 +144,14 @@ export function initGlobe(containerId) {
 export function setCatalog(entries) {
   catalogEntries = Array.isArray(entries) ? entries : [];
   visibleEntries = catalogEntries;
-  // Keep search on the full catalog, while limiting the animated 3D layer to
-  // a representative spread of objects so mid-range devices stay responsive.
-  const maxRenderedSatellites = 3000;
+  // Render all satellites in the catalog for full coverage like satellitetracker3d.com
+  // Modern browsers can handle 10,000+ animated points with WebGL
+  const maxRenderedSatellites = 10000;
   propagationEntries = catalogEntries.length <= maxRenderedSatellites
     ? catalogEntries
     : Array.from({ length: maxRenderedSatellites }, (_, index) =>
       catalogEntries[Math.round(index * (catalogEntries.length - 1) / (maxRenderedSatellites - 1))]);
-  startComputeTimer(propagationEntries.length > 1200 ? 1000 : 250);
+  startComputeTimer(propagationEntries.length > 5000 ? 1500 : 500);
   if (worker && catalogEntries.length) {
     worker.postMessage({ type: 'INIT', catalog: propagationEntries.map(entry => ({
       norad_id: entry.norad_id, name: entry.name, line1: entry.line1 || null,
@@ -179,11 +181,12 @@ function renderPositions(data) {
       lng: Math.atan2(z, -x) * 180 / Math.PI,
       altitude: Math.max(0.003, radius - 1),
       color: CATEGORY_COLORS[propagationEntries[i].category] || CATEGORY_COLORS.unknown,
-      radius: Math.max(0.08, data.sizes[i] * 12),
+      radius: Math.max(0.2, data.sizes[i] * 25),
       entry: propagationEntries[i],
     });
   }
   propagatedPoints = points;
+  console.log(`[globe.js] renderPositions: ${points.length} points, satellitesVisible=${satellitesVisible}`);
   applyPointVisibility();
 }
 
@@ -231,7 +234,11 @@ function applyPointVisibility() {
     const entry = catalogEntries.find(item => Number(item.norad_id) === Number(liveMarker.norad_id));
     points.push({ ...liveMarker, color: '#ffec70', radius: 0.2, entry: entry || { name: liveMarker.name } });
   }
-  if (globe) globe.pointsData(points);
+  console.log(`[globe.js] applyPointVisibility: ${points.length} points to render, satellitesVisible=${satellitesVisible}`);
+  if (globe) {
+    globe.pointsData(points);
+    console.log('[globe.js] pointsData called successfully');
+  }
 }
 
 function applyOrbitVisibility() {
@@ -242,7 +249,9 @@ function applyOrbitVisibility() {
     selected: Number(path.norad_id) === Number(selectedNorad),
   }));
   paths.push(...selectedOrbitPaths);
+  console.log(`[globe.js] applyOrbitVisibility: ${paths.length} orbit paths to render`);
   globe.pathsData(paths);
+  console.log('[globe.js] pathsData called successfully');
 }
 
 export function selectSatellite(noradId) {
@@ -330,24 +339,34 @@ function setTrackedCameraView(view) {
 export function zoomIn() {
   if (!globe) return;
   const view = globe.pointOfView();
+  console.log('[globe.js] zoomIn: current altitude =', view.altitude);
   setTrackedCameraView({ ...view, altitude: Math.max(0.7, view.altitude * 0.78) });
 }
 
 export function zoomOut() {
   if (!globe) return;
   const view = globe.pointOfView();
+  console.log('[globe.js] zoomOut: current altitude =', view.altitude);
   setTrackedCameraView({ ...view, altitude: Math.min(5.6, view.altitude * 1.28) });
 }
 
 export function undoCamera() {
-  if (!globe || cameraHistoryIndex <= 0) return;
+  if (!globe || cameraHistoryIndex <= 0) {
+    console.log('[globe.js] undoCamera: cannot undo, index =', cameraHistoryIndex);
+    return;
+  }
   cameraHistoryIndex -= 1;
+  console.log('[globe.js] undoCamera: moving to index', cameraHistoryIndex);
   globe.pointOfView(cameraHistory[cameraHistoryIndex], 400);
 }
 
 export function redoCamera() {
-  if (!globe || cameraHistoryIndex >= cameraHistory.length - 1) return;
+  if (!globe || cameraHistoryIndex >= cameraHistory.length - 1) {
+    console.log('[globe.js] redoCamera: cannot redo, index =', cameraHistoryIndex, 'length =', cameraHistory.length);
+    return;
+  }
   cameraHistoryIndex += 1;
+  console.log('[globe.js] redoCamera: moving to index', cameraHistoryIndex);
   globe.pointOfView(cameraHistory[cameraHistoryIndex], 400);
 }
 

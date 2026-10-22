@@ -72,7 +72,7 @@ function computePositions(timeMs) {
 // paths remain visible and clickable while the live satellite dots update.
 function computeOrbitPaths() {
   const now = Date.now();
-  const samples = orbitCatalog.length > 8000 ? 28 : 40;
+  const samples = orbitCatalog.length > 10000 ? 32 : 48;
   const paths = [];
   for (const entry of orbitCatalog) {
     const satrec = satrecs[entry.norad_id];
@@ -109,12 +109,8 @@ function computeOrbitPaths() {
 }
 
 function orbitColor(category) {
-  const colors = {
-    crewed: '#168359', rocket_body: '#a77429', debris: '#a54145',
-    constellation: '#167b9c', gnss: '#7440a8', weather: '#9c7f20',
-    payload: '#8795a8', unknown: '#68788b',
-  };
-  return colors[category] || colors.unknown;
+  // All orbits are green for consistent visibility like satellitetracker3d.com
+  return '#00ff00';
 }
 
 /**

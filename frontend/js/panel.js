@@ -335,17 +335,20 @@ function addGraphPoint(graphId, label, value) {
   const chart = window.graphCharts && window.graphCharts[graphId];
   if (!chart) return;
   if (chart.data && chart.data.datasets) {
+    // Keep the graph static - don't scroll, just update the data
     chart.data.labels.push(label);
     chart.data.datasets[0].data.push(value);
-    if (chart.data.labels.length > 60) {
-      chart.data.labels.shift();
-      chart.data.datasets[0].data.shift();
-    }
+    // Remove scrolling - keep all data points instead of shifting
+    // if (chart.data.labels.length > 60) {
+    //   chart.data.labels.shift();
+    //   chart.data.datasets[0].data.shift();
+    // }
     chart.update('none');
   } else {
     chart.labels.push(label);
     chart.values.push(value);
-    if (chart.values.length > 60) { chart.values.shift(); chart.labels.shift(); }
+    // Remove scrolling for fallback chart too
+    // if (chart.values.length > 60) { chart.values.shift(); chart.labels.shift(); }
     drawFallbackChart(chart);
   }
 }

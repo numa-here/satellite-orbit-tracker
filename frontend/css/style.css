@@ -582,7 +582,7 @@ html, body {
 #search-card {
   top: 72px;
   left: 24px;
-  min-width: 260px;
+  min-width: 300px;
 }
 
 .search-label {
