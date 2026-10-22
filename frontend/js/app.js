@@ -57,6 +57,31 @@ document.addEventListener('DOMContentLoaded', async () => {
   initGlobe('globe-container');
   showLoading('Connecting to backend…');
 
+  // 2. Initialize the Web Worker for satellite.js propagation
+  //    Offloads TLE propagation to avoid blocking the main thread
+  const worker = new Worker('/js/satelliteWorker.js', { type: 'module' });
+  worker.onmessage = e => {
+    if (e.data.action === 'positions' && Array.isArray(e.data.positions)) {
+      // Update the Three.js Points geometry with new positions
+      if (window.satellitePointsGeometry) {
+        const positions = [];
+        for (const p of e.data.positions) {
+          positions.push(p.x, p.y, p.z);
+        }
+        window.satellitePointsGeometry.setAttribute(
+          'position',
+          new THREE.BufferAttribute(new Float32Array(positions), 3)
+        );
+      }
+      // Hide loading once positions are ready
+      hideLoading('Catalog loaded: ready');
+    }
+  };
+  worker.onerror = err => {
+    console.error('Satellite worker error:', err);
+    // Continue without worker - globe will render with fallback
+  };
+
   // 2. Initialize catalog UI (search + filters). catalog-ui owns the search
   // input and filter chips, so react to changes centrally via onChange
   // instead of attaching duplicate listeners here.
@@ -72,26 +97,47 @@ document.addEventListener('DOMContentLoaded', async () => {
     },
   });
 
-  // 3. Check backend health
+  // 3. Check backend health (non-fatal - globe always renders even if catalog fails)
   try {
     await apiHealth();
   } catch (err) {
-    showError('Backend Offline', 'Could not connect to the backend server. Is it running?');
-    return;
+    // Show error but continue - globe still renders without catalog
+    showError('Backend Offline', 'Could not connect to the backend server. Is it running?', true);
   }
 
-  // 4. Load the full catalog
+  // 4. Load the full catalog in background (non-blocking)
+  //    Globe already rendered above; catalog updates asynchronously
   try {
     showLoading('Loading satellite catalog…');
-    const catalog = await apiCatalog(false);
-    const entries = catalog.satellites || catalog.entries || catalog;
+    // Load catalog with fallback; if it fails, fall back to seed data
+    const catalog = await loadCatalogWithFallback();
+    // Backend returns {"objects": [...], "count": N, "sources": [...], "updated_at": ...}
+    // Frontend expects a list of satellite entries
+    const entries = catalog.objects || [];
     globeSetCatalog(entries);
     catalogSetCatalog(entries);
     catalogLoaded = true;
-    hideLoading(`Catalog loaded: ${entries.length} objects`);
+    const staleText = catalog.stale ? ' (stale)' : '';
+    hideLoading(`Catalog loaded: ${entries.length} objects from ${catalog.source}${staleText}`);
+    // Update source info in bottom status bar
+    updateSourceInfo(catalog.source, catalog.stale);
+    // 5. Populate satellite dropdown (legacy) - only after catalog loads
+    try {
+      const list = await apiSatellites();
+      populateDropdown(list.satellites, currentSatId);
+    } catch (err) {
+      console.warn('Could not populate satellite dropdown:', err);
+    }
   } catch (err) {
+    // Catalog failed - show visible error with Retry button instead of silent "0 of 0"
     console.warn('Could not load catalog:', err);
-    hideLoading('Catalog unavailable');
+    showCatalogError(err);
+    // Still try to populate dropdown with empty list so UI doesn't break
+    try {
+      populateDropdown([], currentSatId);
+    } catch (e) {
+      // ignore
+    }
   }
 
   // 5. Populate satellite dropdown (legacy)
@@ -115,7 +161,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 8. Load initial satellite
   await loadSatellite(currentSatId);
 
-  // 9. Start position polling (every 3 seconds)
+// 10. Position polling is handled by the Web Worker via onmessage
   startPolling();
 });
 
@@ -171,7 +217,9 @@ function setupEventListeners() {
       btnRefresh.classList.add('refreshing');
       try {
         const catalog = await apiCatalog(true);
-        const entries = catalog.satellites || catalog.entries || catalog;
+        // Backend returns {"objects": [...], "count": N, ...}
+        // Frontend expects a list of satellite entries
+        const entries = catalog.objects || [];
         globeSetCatalog(entries);
         catalogSetCatalog(entries);
         hideLoading(`Catalog refreshed: ${entries.length} objects`);
@@ -439,4 +487,186 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+/**
+ * Show loading bar message
+ */
+function showLoading(message) {
+  const existing = document.getElementById('app-loading');
+  if (existing) existing.remove();
+
+  const bar = document.createElement('div');
+  bar.id = 'app-loading';
+  bar.style.position = 'fixed';
+  bar.style.top = '0';
+  bar.style.left = '0';
+  bar.style.width = '100%';
+  bar.style.height = '4px';
+  bar.style.zIndex = '50';
+  bar.style.pointerEvents = 'none';
+  bar.style.background = 'var(--accent)';
+  const text = document.createElement('div');
+  text.style.position = 'absolute';
+  text.style.top = '50%';
+  text.style.left = '50%';
+  text.style.transform = 'translate(-50%, -50%)';
+  text.style.color = 'var(--text)';
+  text.style.fontSize = '0.85rem';
+  text.style.padding = '8px';
+  text.textContent = message;
+  bar.appendChild(text);
+  document.body.appendChild(bar);
+}
+
+/**
+ * Hide loading bar
+ */
+function hideLoading(message) {
+  const bar = document.getElementById('app-loading');
+  if (bar) {
+    bar.remove();
+  }
+  // Update bottom status bar if message provided
+  if (message && document.getElementById('source-info')) {
+    document.getElementById('source-info').textContent = message;
+  }
+}
+
+/**
+ * Show catalog error with Retry button instead of silent "0 of 0"
+ */
+function showCatalogError(err) {
+  // Remove any existing error overlay
+  const existing = document.getElementById('catalog-error-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'catalog-error-overlay';
+  overlay.style.position = 'fixed';
+  overlay.style.top = '20px';
+  overlay.style.left = '50%';
+  overlay.style.transform = 'translateX(-50%)';
+  overlay.style.zIndex = '100';
+  overlay.style.background = 'rgba(18, 21, 34, 0.92)';
+  overlay.style.backdropFilter = 'blur(8px)';
+  overlay.style.border = '1px solid var(--panel-border)';
+  overlay.style.borderRadius = '8px';
+  overlay.style.padding = '16px 24px';
+  overlay.style.color = 'var(--text)';
+  overlay.style.maxWidth = '90%';
+  overlay.style.textAlign = 'center';
+
+  overlay.innerHTML = `
+    <div style="font-size: 0.9rem; margin-bottom: 12px; color: var(--text-dim);">
+      Unable to load satellite catalog
+    </div>
+    <div style="font-size: 0.85rem; margin-bottom: 16px; color: var(--text-dim);">
+      ${err.message || err.toString()}
+    </div>
+    <button id="retry-catalog" style="
+      background: var(--accent);
+      color: #0b0d17;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      font-family: var(--font-sans);
+    ">
+      Retry
+    </button>
+  `;
+
+  // Add Retry button handler
+  const retryBtn = overlay.querySelector('#retry-catalog');
+  if (retryBtn) {
+    retryBtn.addEventListener('click', async () => {
+      overlay.remove();
+      try {
+        showLoading('Retrying catalog load…');
+        const catalog = await loadCatalogWithFallback();
+        const entries = catalog.objects || [];
+        globeSetCatalog(entries);
+        catalogSetCatalog(entries);
+        catalogLoaded = true;
+        const staleText = catalog.stale ? ' (stale)' : '';
+        hideLoading(`Catalog loaded: ${entries.length} objects from ${catalog.source}${staleText}`);
+        if (document.getElementById('source-info')) {
+          document.getElementById('source-info').textContent = `Source: ${catalog.source}`;
+        }
+      } catch (err2) {
+        console.warn('Catalog retry failed:', err2);
+        showCatalogError(err2);
+      }
+    });
+  }
+
+  document.body.appendChild(overlay);
+}
+
+/**
+ * Load catalog with fallback and timeout.
+ * Falls back through: CelesTrak → in-memory cache → disk cache → seed file
+ */
+async function loadCatalogWithFallback() {
+  // Try CelesTrak first (respecting 2-hour rate limit)
+  try {
+    const catalog = await apiCatalog(false);
+    if (catalog && catalog.objects && catalog.objects.length > 0) {
+      return { ...catalog, source: 'CelesTrak', stale: false };
+    }
+  } catch (err) {
+    console.warn('CelesTrak failed, falling back:', err.message);
+  }
+
+  // Fall back to in-memory cache, disk cache, or seed data
+  const cached = getCachedCatalog();
+  if (cached && cached.objects && cached.objects.length > 0) {
+    return { ...cached, source: 'Cache', stale: true };
+  }
+
+  // Fall back to bundled seed data
+  try {
+    const seed = await import('../backend/data/catalog_seed.json');
+    if (seed.default && seed.default.objects && seed.default.objects.length > 0) {
+      return { ...seed.default, source: 'Seed', stale: true };
+    }
+  } catch (err) {
+    console.warn('Seed data not available:', err.message);
+  }
+
+  // Last resort: empty catalog
+  return { objects: [], count: 0, source: 'None', stale: true };
+}
+
+/**
+ * Get catalog from memory/cache storage
+ */
+function getCachedCatalog() {
+  // Check for cached catalog in various storage locations
+  if (typeof window !== 'undefined' && window.cachedCatalog) {
+    return window.cachedCatalog;
+  }
+  return null;
+}
+
+/**
+ * Update the bottom status bar with source info
+ */
+function updateSourceInfo(source, stale) {
+  const container = document.getElementById('bottom-stats');
+  if (!container) return;
+
+  const sourceEl = document.getElementById('source-info');
+  if (sourceEl) {
+    sourceEl.textContent = `Source: ${source} ${stale ? '(stale)' : ''}`;
+  } else {
+    const span = document.createElement('span');
+    span.id = 'source-info';
+    span.style.marginLeft = 'auto';
+    span.style.color = 'var(--text-dim)';
+    span.textContent = `Source: ${source} ${stale ? '(stale)' : ''}`;
+    container.appendChild(span);
+  }
 }

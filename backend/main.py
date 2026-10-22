@@ -62,11 +62,44 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
     summary="Health check",
     tags=["Diagnostics"],
 )
-async def health_check():
-    """Verify backend health and return the current server UTC timestamp."""
+async def health_check(
+    request: Request,
+):
+    """Verify backend health and return catalog status."""
+    # Get catalog status for health check
+    try:
+        catalog = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: None  # Placeholder - actual catalog check below
+        )
+    except Exception:
+        pass
+
+    # Check if KeepTrack key is configured
+    key_configured = bool(config_KEEPTRACK_API_KEY)
+
+    # Try to get catalog info for count and source
+    try:
+        from .catalog_service import get_catalog
+        cat_data = get_catalog(force_refresh=False)
+        catalog_count = cat_data.get("count", 0)
+        source = cat_data.get("source", "None")
+        # Get last refresh from updated_at or timestamp
+        last_refresh = cat_data.get("updated_at") or cat_data.get("timestamp")
+        if last_refresh is None:
+            last_refresh = None
+    except Exception:
+        catalog_count = 0
+        source = "None"
+        last_refresh = None
+
     return HealthResponse(
         status="ok",
         timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        catalog_count=catalog_count,
+        source=source,
+        last_refresh=last_refresh,
+        key_configured=key_configured,
     )
 
 
@@ -258,3 +291,35 @@ if (FRONTEND_DIR / "css").is_dir():
 
 if (FRONTEND_DIR / "js").is_dir():
     app.mount("/js", StaticFiles(directory=FRONTEND_DIR / "js"), name="js")
+
+@app.get(
+    "/api/catalog",
+    summary="Get satellite catalog with pagination",
+    tags=["Catalog"],
+)
+async def catalog_api(
+    limit: int = Query(default=None, ge=1, le=100000, description="Maximum number of objects to return"),
+    offset: int = Query(default=0, ge=0, description="Number of objects to skip"),
+):
+    """Get satellite catalog with pagination support.
+
+    Returns compact satellite data suitable for Three.js satellite.js propagation.
+    Uses the 5-tier fallback chain: KeepTrack → CelesTrak → cache → seed data.
+    """
+    from .config import CATALOG_MAX_OBJECTS
+    # Respect the configured max, but allow override via query param
+    effective_limit = limit if limit is not None else CATALOG_MAX_OBJECTS
+    effective_limit = min(effective_limit, 100000)  # hard cap
+
+    catalog = build_catalog(limit=effective_limit, offset=offset)
+    return JSONResponse(
+        content={
+            "objects": catalog["objects"],
+            "count": catalog["count"],
+            "total_count": catalog["total_count"],
+            "sources": catalog["sources"],
+            "limit": catalog["limit"],
+            "offset": catalog["offset"],
+        },
+        media_type="application/json",
+    )
