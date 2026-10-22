@@ -81,6 +81,24 @@ html, body {
   pointer-events: none;
 }
 
+/* Keep a deep-space starfield visible even when a WebGL implementation clears
+   its canvas opaquely instead of honoring the transparent renderer setting. */
+#globe-container::after {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1px 1px at 13% 21%, rgba(255,255,255,.8) 98%, transparent),
+    radial-gradient(1px 1px at 42% 69%, rgba(215,231,255,.75) 98%, transparent),
+    radial-gradient(1.5px 1.5px at 77% 35%, rgba(255,255,255,.85) 98%, transparent),
+    radial-gradient(1px 1px at 89% 82%, rgba(207,220,240,.7) 98%, transparent);
+  background-size: 197px 181px, 251px 223px, 307px 269px, 359px 313px;
+}
+
+#globe-container.earth-fallback-overlay::before { z-index: 3; }
+
 @keyframes earth-texture-rotation {
   from { background-position: center, center, 0% center; }
   to { background-position: center, center, 100% center; }

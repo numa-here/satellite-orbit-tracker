@@ -65,6 +65,23 @@ export function initGlobe(containerId) {
     const globeMaterial = globe.globeMaterial();
     if (globeMaterial?.color?.set) globeMaterial.color.set('#315b78');
 
+    // Some hosted/headless WebGL builds report a ready globe but never paint
+    // the Earth texture. Put the bundled textured Earth above that empty
+    // canvas until a real texture image is available.
+    let textureChecks = 0;
+    const checkEarthTexture = () => {
+      if (!globe) return;
+      const image = globe.globeMaterial()?.map?.image;
+      if (image?.complete && image.naturalWidth > 0) {
+        container.classList.remove('earth-fallback-overlay');
+        return;
+      }
+      container.classList.add('earth-fallback-overlay');
+      textureChecks += 1;
+      if (textureChecks < 12) window.setTimeout(checkEarthTexture, 1000);
+    };
+    window.setTimeout(checkEarthTexture, 1200);
+
     window.globe = globe;
     const resize = () => {
       const width = container.clientWidth || window.innerWidth;
