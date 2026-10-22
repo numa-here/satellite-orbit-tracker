@@ -420,6 +420,10 @@ function switchInfoTab(tabId) {
 
 /** Populate the info panel with satellite data */
 function updateInfoPanel(entry, pos, elems) {
+  const formatNumber = (value, digits, suffix = '') => {
+    const number = Number(value);
+    return Number.isFinite(number) ? `${number.toFixed(digits)}${suffix}` : '—';
+  };
   if (entry) {
     document.getElementById('info-norad').textContent = entry.norad_id || '—';
     document.getElementById('info-desig').textContent = entry.intl_designator || '—';
@@ -441,15 +445,15 @@ function updateInfoPanel(entry, pos, elems) {
     document.getElementById('info-age').textContent = pos.tle_age_days.toFixed(1) + ' days';
   }
   if (elems) {
-    document.getElementById('info-inc').textContent = elems.inclination_deg.toFixed(4) + '°';
-    document.getElementById('info-ecc').textContent = elems.eccentricity.toFixed(7);
-    document.getElementById('info-raan').textContent = elems.raan_deg.toFixed(4) + '°';
-    document.getElementById('info-argp').textContent = elems.arg_of_perigee_deg.toFixed(4) + '°';
-    document.getElementById('info-ma').textContent = elems.mean_anomaly_deg.toFixed(4) + '°';
-    document.getElementById('info-mm').textContent = elems.mean_motion_rev_per_day.toFixed(8) + ' rev/day';
-    document.getElementById('info-period').textContent = elems.orbital_period_minutes.toFixed(2) + ' min';
-    document.getElementById('info-apogee').textContent = elems.apogee_km.toFixed(1) + ' km';
-    document.getElementById('info-perigee').textContent = elems.perigee_km.toFixed(1) + ' km';
+    document.getElementById('info-inc').textContent = formatNumber(elems.inclination_deg, 4, '°');
+    document.getElementById('info-ecc').textContent = formatNumber(elems.eccentricity, 7);
+    document.getElementById('info-raan').textContent = formatNumber(elems.raan_deg, 4, '°');
+    document.getElementById('info-argp').textContent = formatNumber(elems.arg_of_perigee_deg, 4, '°');
+    document.getElementById('info-ma').textContent = formatNumber(elems.mean_anomaly_deg, 4, '°');
+    document.getElementById('info-mm').textContent = formatNumber(elems.mean_motion_rev_per_day, 8, ' rev/day');
+    document.getElementById('info-period').textContent = formatNumber(elems.orbital_period_minutes, 2, ' min');
+    document.getElementById('info-apogee').textContent = formatNumber(elems.apogee_km, 1, ' km');
+    document.getElementById('info-perigee').textContent = formatNumber(elems.perigee_km, 1, ' km');
   }
 }
 

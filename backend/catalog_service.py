@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from .config import (
+    CATALOG_MAX_OBJECTS,
     CATALOG_CACHE_TTL_SECONDS,
     CELESTRAK_GP_GROUPS,
     KEEPTRACK_API_KEY,
@@ -129,29 +130,36 @@ def _orbit_regime(entry: CatalogEntry) -> str:
 
 
 def _normalize_omm(sat_data: Dict[str, Any], group: str) -> Optional[CatalogEntry]:
-    norad = _safe_int(sat_data.get("NORAD_CAT_ID"))
+    nested_omm = sat_data.get("omm") if isinstance(sat_data.get("omm"), dict) else None
+    omm = nested_omm or sat_data
+    norad = _safe_int(
+        sat_data.get("NORAD_CAT_ID")
+        or sat_data.get("norad_id")
+        or sat_data.get("catalog_number")
+        or omm.get("NORAD_CAT_ID")
+    )
     if norad is None:
         return None
     return CatalogEntry(
         norad_id=norad,
-        name=_first_str(sat_data, ["OBJECT_NAME"]) or "UNKNOWN",
-        object_type=_first_str(sat_data, ["OBJECT_TYPE"]),
-        country=_first_str(sat_data, ["OWNER"]),
-        launch_date=_first_str(sat_data, ["LAUNCH_DATE"]),
-        launch_site=_first_str(sat_data, ["LAUNCH_SITE"]),
-        intl_designator=_first_str(sat_data, ["OBJECT_ID"]),
-        orbit_class=_first_str(sat_data, ["ORBIT_TYPE"]),
-        line1=_first_str(sat_data, ["TLE_LINE1"]),
-        line2=_first_str(sat_data, ["TLE_LINE2"]),
-        omm=sat_data if isinstance(sat_data, dict) else None,
-        source="celestrak",
-        group=group,
-        decay_date=_first_str(sat_data, ["DECAY_DATE"]),
-        period_minutes=_safe_float(sat_data.get("PERIOD")),
-        apogee_km=_safe_float(sat_data.get("APOGEE")),
-        perigee_km=_safe_float(sat_data.get("PERIGEE")),
-        inclination_deg=_safe_float(sat_data.get("INCLINATION")),
-        rcs_m2=_safe_float(sat_data.get("RCS")),
+        name=_first_str(sat_data, ["OBJECT_NAME", "name"]) or _first_str(omm, ["OBJECT_NAME"]) or "UNKNOWN",
+        object_type=_first_str(sat_data, ["OBJECT_TYPE", "object_type"]) or _first_str(omm, ["OBJECT_TYPE"]),
+        country=_first_str(sat_data, ["OWNER", "country"]) or _first_str(omm, ["OWNER"]),
+        launch_date=_first_str(sat_data, ["LAUNCH_DATE", "launch_date"]) or _first_str(omm, ["LAUNCH_DATE"]),
+        launch_site=_first_str(sat_data, ["LAUNCH_SITE", "launch_site"]) or _first_str(omm, ["LAUNCH_SITE"]),
+        intl_designator=_first_str(sat_data, ["OBJECT_ID", "intl_designator"]) or _first_str(omm, ["OBJECT_ID"]),
+        orbit_class=_first_str(sat_data, ["ORBIT_TYPE", "orbit_class"]) or _first_str(omm, ["ORBIT_TYPE"]),
+        line1=_first_str(sat_data, ["TLE_LINE1", "line1", "tle_line1"]) or _first_str(omm, ["TLE_LINE1"]),
+        line2=_first_str(sat_data, ["TLE_LINE2", "line2", "tle_line2"]) or _first_str(omm, ["TLE_LINE2"]),
+        omm=omm if isinstance(omm, dict) else None,
+        source=_first_str(sat_data, ["source"]) or "celestrak",
+        group=_first_str(sat_data, ["group"]) or group,
+        decay_date=_first_str(sat_data, ["DECAY_DATE", "decay_date"]) or _first_str(omm, ["DECAY_DATE"]),
+        period_minutes=_safe_float(sat_data.get("PERIOD") or sat_data.get("period_minutes") or omm.get("PERIOD")),
+        apogee_km=_safe_float(sat_data.get("APOGEE") or sat_data.get("apogee_km") or omm.get("APOGEE")),
+        perigee_km=_safe_float(sat_data.get("PERIGEE") or sat_data.get("perigee_km") or omm.get("PERIGEE")),
+        inclination_deg=_safe_float(sat_data.get("INCLINATION") or sat_data.get("inclination_deg") or omm.get("INCLINATION")),
+        rcs_m2=_safe_float(sat_data.get("RCS") or sat_data.get("rcs_m2") or omm.get("RCS")),
     )
 
 
@@ -314,7 +322,7 @@ def _entry_to_compact(entry: CatalogEntry) -> Dict[str, Any]:
     }
 
 
-def build_catalog() -> Dict[str, Any]:
+def build_catalog(limit: Optional[int] = None, offset: int = 0) -> Dict[str, Any]:
     items: Dict[int, CatalogEntry] = {}
     sources: List[str] = []
 
@@ -345,11 +353,13 @@ def build_catalog() -> Dict[str, Any]:
                 continue
             if sat_list:
                 celestrak_present = True
-            if sat_list and not (isinstance(result, dict) and result.get("stale")):
+            group_stale = bool(isinstance(result, dict) and result.get("stale"))
+            if sat_list and not group_stale:
                 celestrak_ok = True
             for sat_data in sat_list:
                 entry = _normalize_omm(sat_data, group)
                 if entry and entry.norad_id not in items:
+                    entry.stale = group_stale
                     items[entry.norad_id] = entry
 
     # Fresh upstream entries take precedence; bundled OMMs keep the app usable
@@ -383,7 +393,7 @@ def build_catalog() -> Dict[str, Any]:
     all_objects = sorted(items.values(), key=lambda e: e.norad_id)
     total = len(all_objects)
 
-    effective_limit = limit or CATALOG_MAX_OBJECTS
+    effective_limit = CATALOG_MAX_OBJECTS if limit is None else limit
     if effective_limit is None:
         effective_limit = total
     elif effective_limit < 0:

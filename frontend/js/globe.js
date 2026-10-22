@@ -15,6 +15,8 @@ let computeTimer = null;
 let satellitesVisible = true;
 let earthVisible = true;
 let liveMarker = null;
+let cameraHistory = [];
+let cameraHistoryIndex = -1;
 
 const CATEGORY_COLORS = {
   crewed: '#00ff88', rocket_body: '#ffaa00', debris: '#ff4444',
@@ -30,9 +32,10 @@ export function initGlobe(containerId) {
   } else {
     try {
     globe = window.Globe()
-      .globeImageUrl('https://cdn.jsdelivr.net/npm/three-globe@2.40.0/example/img/earth-blue-marble.jpg')
-      .bumpImageUrl('https://cdn.jsdelivr.net/npm/three-globe@2.40.0/example/img/earth-topology.png')
-      .backgroundImageUrl('https://cdn.jsdelivr.net/npm/three-globe@2.40.0/example/img/night-sky.png')
+      .globeImageUrl('/vendor/earth-blue-marble.jpg')
+      .bumpImageUrl('/vendor/earth-topology.png')
+      .backgroundImageUrl('/vendor/night-sky.png')
+      .showGlobe(true)
       .showAtmosphere(true)
       .atmosphereColor('#4da6ff')
       .atmosphereAltitude(0.15)
@@ -71,7 +74,10 @@ export function initGlobe(containerId) {
     controls.autoRotateSpeed = 0.3;
     controls.minDistance = 1.02;
     controls.maxDistance = 6.6;
-    globe.pointOfView({ lat: 20, lng: 0, altitude: 1.45 }, 0);
+    const initialView = { lat: 20, lng: 0, altitude: 1.45 };
+    globe.pointOfView(initialView, 0);
+    cameraHistory = [initialView];
+    cameraHistoryIndex = 0;
     } catch (error) {
       console.error('3D globe initialization failed:', error);
       globe = null;
@@ -235,6 +241,38 @@ export function followSatellite(lat, lon) {
 export function setFollowMode(on) {
   followMode = on;
   if (globe) globe.controls().autoRotate = !followMode;
+}
+
+function setTrackedCameraView(view) {
+  if (!globe) return;
+  cameraHistory = cameraHistory.slice(0, cameraHistoryIndex + 1);
+  cameraHistory.push({ lat: view.lat, lng: view.lng, altitude: view.altitude });
+  cameraHistoryIndex = cameraHistory.length - 1;
+  globe.pointOfView(view, 400);
+}
+
+export function zoomIn() {
+  if (!globe) return;
+  const view = globe.pointOfView();
+  setTrackedCameraView({ ...view, altitude: Math.max(0.7, view.altitude * 0.78) });
+}
+
+export function zoomOut() {
+  if (!globe) return;
+  const view = globe.pointOfView();
+  setTrackedCameraView({ ...view, altitude: Math.min(5.6, view.altitude * 1.28) });
+}
+
+export function undoCamera() {
+  if (!globe || cameraHistoryIndex <= 0) return;
+  cameraHistoryIndex -= 1;
+  globe.pointOfView(cameraHistory[cameraHistoryIndex], 400);
+}
+
+export function redoCamera() {
+  if (!globe || cameraHistoryIndex >= cameraHistory.length - 1) return;
+  cameraHistoryIndex += 1;
+  globe.pointOfView(cameraHistory[cameraHistoryIndex], 400);
 }
 
 function showGlobeError(message) {

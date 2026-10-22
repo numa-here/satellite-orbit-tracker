@@ -105,8 +105,21 @@ def test_catalog_missing_satcat_rows_remain_valid(monkeypatch):
     entry = data["objects"][0]
     assert entry["norad_id"] == 48274
     # Missing SATCAT metadata must not make the entry invalid.
-    assert entry["category"] == "payload"
+    assert entry["category"] == "crewed"
     assert entry["orbit_regime"] == "LEO"
+
+
+def test_catalog_build_returns_omm_seeds_when_upstreams_are_empty(monkeypatch):
+    from backend import catalog_service
+    from backend.seed_data import SEED_SATELLITES
+
+    _patch_catalog_service(monkeypatch, keep_items=[], celestrak_groups={})
+    data = catalog_service.build_catalog()
+
+    assert data["count"] == len(SEED_SATELLITES)
+    assert data["stale"] is True
+    assert "seed" in data["sources"]
+    assert all(entry["omm"] for entry in data["objects"])
 
 
 def test_empty_upstream_and_empty_cache_fall_back_to_omm_seed(monkeypatch):

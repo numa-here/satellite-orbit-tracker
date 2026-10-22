@@ -64,6 +64,7 @@ SATCAT_URL = os.getenv(
 
 CELESTRAK_GP_GROUPS = [
     "active",
+    "stations",
     "starlink",
     "oneweb",
     "gps-ops",

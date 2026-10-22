@@ -10,6 +10,7 @@ import {
   selectSatellite, hoverSatellite, updateSatMarker, drawOrbitPath,
   followSatellite, setFollowMode, getCatalog, getSelectedNorad,
   setSimulationRate, setSimulationTime, setSatellitesVisible, setEarthVisible,
+  zoomIn, zoomOut, undoCamera, redoCamera,
 } from './globe.js';
 
 import { initCatalogUI, setCatalog as catalogSetCatalog } from './catalog-ui.js';
@@ -259,6 +260,16 @@ function setupEventListeners() {
       btnToggleEarth.classList.toggle('active', visible);
       setEarthVisible(visible);
     });
+  }
+
+  const cameraActions = {
+    'btn-zoom-in': zoomIn,
+    'btn-zoom-out': zoomOut,
+    'btn-undo': undoCamera,
+    'btn-redo': redoCamera,
+  };
+  for (const [id, action] of Object.entries(cameraActions)) {
+    document.getElementById(id)?.addEventListener('click', action);
   }
 
   // Panel triggers: open/close floating glass panels
