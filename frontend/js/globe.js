@@ -2,6 +2,7 @@
 let globe = null;
 let worker = null;
 let catalogEntries = [];
+let propagationEntries = [];
 let visibleEntries = [];
 let propagatedPoints = [];
 let activeFilters = {};
@@ -126,22 +127,22 @@ export function initGlobe(containerId) {
   } catch (error) {
     console.error('Could not start satellite worker:', error);
   }
-  if (!computeTimer) {
-    computeTimer = window.setInterval(() => {
-      const now = Date.now();
-      simulationTime += (now - lastSimulationTick) * simulationRate;
-      lastSimulationTick = now;
-      window.simulationTime = simulationTime;
-      if (worker) worker.postMessage({ type: 'COMPUTE', time: simulationTime });
-    }, 250);
-  }
+  startComputeTimer(250);
 }
 
 export function setCatalog(entries) {
   catalogEntries = Array.isArray(entries) ? entries : [];
   visibleEntries = catalogEntries;
+  // Keep search on the full catalog, while limiting the animated 3D layer to
+  // a representative spread of objects so mid-range devices stay responsive.
+  const maxRenderedSatellites = 3000;
+  propagationEntries = catalogEntries.length <= maxRenderedSatellites
+    ? catalogEntries
+    : Array.from({ length: maxRenderedSatellites }, (_, index) =>
+      catalogEntries[Math.round(index * (catalogEntries.length - 1) / (maxRenderedSatellites - 1))]);
+  startComputeTimer(propagationEntries.length > 1200 ? 1000 : 250);
   if (worker && catalogEntries.length) {
-    worker.postMessage({ type: 'INIT', catalog: catalogEntries.map(entry => ({
+    worker.postMessage({ type: 'INIT', catalog: propagationEntries.map(entry => ({
       norad_id: entry.norad_id, line1: entry.line1 || null,
       line2: entry.line2 || null, omm: entry.omm || null,
       category: entry.category || 'unknown',
@@ -153,24 +154,35 @@ export function setCatalog(entries) {
 function renderPositions(data) {
   if (!globe) return;
   const points = [];
-  for (let i = 0; i < catalogEntries.length; i++) {
+  for (let i = 0; i < propagationEntries.length; i++) {
     if (!data.valid[i]) continue;
     const x = data.positions[i * 3];
     const y = data.positions[i * 3 + 1];
     const z = data.positions[i * 3 + 2];
     const radius = Math.hypot(x, y, z);
     points.push({
-      norad_id: catalogEntries[i].norad_id,
+      norad_id: propagationEntries[i].norad_id,
       lat: Math.asin(y / radius) * 180 / Math.PI,
       lng: Math.atan2(z, -x) * 180 / Math.PI,
       altitude: Math.max(0.003, radius - 1),
-      color: CATEGORY_COLORS[catalogEntries[i].category] || CATEGORY_COLORS.unknown,
+      color: CATEGORY_COLORS[propagationEntries[i].category] || CATEGORY_COLORS.unknown,
       radius: Math.max(0.08, data.sizes[i] * 12),
-      entry: catalogEntries[i],
+      entry: propagationEntries[i],
     });
   }
   propagatedPoints = points;
   applyPointVisibility();
+}
+
+function startComputeTimer(intervalMs) {
+  if (computeTimer) clearInterval(computeTimer);
+  computeTimer = window.setInterval(() => {
+    const now = Date.now();
+    simulationTime += (now - lastSimulationTick) * simulationRate;
+    lastSimulationTick = now;
+    window.simulationTime = simulationTime;
+    if (worker) worker.postMessage({ type: 'COMPUTE', time: simulationTime });
+  }, intervalMs);
 }
 
 export function setFilters(filters) {
