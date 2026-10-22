@@ -72,6 +72,7 @@ const FILTER_CONFIGS = {
   category: CATEGORY_CONFIG,
   regime: REGIME_CONFIG,
   objectType: OBJECT_TYPE_CONFIG,
+  country: {},
 };
 
 // --- Pure helpers ---------------------------------------------------------
@@ -102,6 +103,11 @@ function matchesObjectType(entry) {
   return filters.objectType.has(normalizeObjectType(entry));
 }
 
+function matchesCountry(entry) {
+  if (filters.country.size === 0) return true;
+  return filters.country.has(entry.country || 'unknown');
+}
+
 // --- Filter pipeline ------------------------------------------------------
 
 function applyFilters() {
@@ -113,6 +119,7 @@ function applyFilters() {
     if (!matchesCategory(entry)) continue;
     if (!matchesRegime(entry)) continue;
     if (!matchesObjectType(entry)) continue;
+    if (!matchesCountry(entry)) continue;
     filteredIds.add(entry.norad_id);
   }
 }
@@ -146,6 +153,11 @@ export function initCatalogUI(opts = {}) {
 
 export function setCatalog(entries) {
   catalog = entries || [];
+  const countries = [...new Set(catalog.map(entry => entry.country || 'unknown'))].sort();
+  FILTER_CONFIGS.country = Object.fromEntries(countries.map(country => [country, {
+    label: country, color: '#c7d2e0',
+  }]));
+  buildFilterChips('country-filters', FILTER_CONFIGS.country, 'country');
   haystacks = catalog.map(buildHaystack);
   noradIndex = new Map();
   for (const entry of catalog) {

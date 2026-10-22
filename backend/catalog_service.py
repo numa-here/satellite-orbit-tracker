@@ -309,6 +309,9 @@ def _entry_to_compact(entry: CatalogEntry) -> Dict[str, Any]:
         "country": entry.country,
         "group": entry.group,
         "stale": entry.stale,
+        "line1": entry.line1,
+        "line2": entry.line2,
+        "omm": entry.omm,
         # Orbital elements for satellite.js propagation
         "inclination_deg": entry.inclination_deg,
         "mean_motion": _safe_float(entry.omm.get("MEAN_MOTION")) if entry.omm else None,
@@ -435,6 +438,7 @@ def get_catalog(force_refresh: bool = False) -> Dict[str, Any]:
                     longitude=sat_data.get("longitude", 0.0),
                     altitude_km=sat_data.get("altitude_km", 0.0),
                     inclination_deg=sat_data.get("inclination_deg", 0.0),
+                    omm=sat_data,
                     source="Seed",
                     stale=True,
                 )

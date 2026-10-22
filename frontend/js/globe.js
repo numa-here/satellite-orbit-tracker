@@ -1,420 +1,200 @@
-/**
- * globe.js – Manages the globe.gl 3D Earth, the full-catalog Three.js Points
- * layer, orbit paths, camera follow, and hover/click picking.
- *
- * Exports:
- *   initGlobe(containerId)        – create globe + Points layer
- *   setCatalog(entries)           – upload catalog to worker + GPU
- *   setFilters(filters)           – apply category/regime/type filters
- *   setSearch(query)              – apply search text filter
- *   selectSatellite(noradId)      // click → info panel + orbit line
- *   hoverSatellite(noradId)       // tooltip
- *   followSatellite(lat, lon)     // point camera
- *   setFollowMode(on)             // toggle auto-follow
- *   updateSatMarker(lat, lon, alt, name)  // legacy single-sat marker
- *   drawOrbitPath(points)         // legacy ground track
- */
-
-import * as THREE from 'https://unpkg.com/three@0.160.0/build/three.module.js';
-
+/** 3D Earth and satellite catalog rendering. */
 let globe = null;
-let followMode = false;
 let worker = null;
-let workerReady = false;
 let catalogEntries = [];
-let visibleIndices = [];
-
-let pointsMesh = null;
-let pointsGeometry = null;
-let pointsMaterial = null;
-let positions = null;
-let colors = null;
-let sizes = null;
-let valid = null;
-let noradIds = null;
-
-let orbitPathData = [];
-let raycaster = null;
-let mouse = new THREE.Vector2();
-let hoveredNorad = null;
+let visibleEntries = [];
+let propagatedPoints = [];
+let activeFilters = {};
+let activeSearch = '';
 let selectedNorad = null;
-let followTarget = null;
+let followMode = false;
 
 const CATEGORY_COLORS = {
-  crewed:     [0.0, 1.0, 0.53],
-  rocket_body:[1.0, 0.67, 0.0],
-  debris:     [1.0, 0.27, 0.27],
-  constellation:[0.0, 0.83, 1.0],
-  gnss:       [0.67, 0.0, 1.0],
-  weather:    [1.0, 0.67, 0.0],
-  payload:    [1.0, 1.0, 1.0],
-  unknown:    [0.4, 0.4, 0.4],
+  crewed: '#00ff88', rocket_body: '#ffaa00', debris: '#ff4444',
+  constellation: '#00d4ff', gnss: '#aa00ff', weather: '#ffaa00',
+  payload: '#ffffff', unknown: '#9aa4b2',
 };
 
-let satMarkerData = [];
-
-function initGlobe(containerId) {
+export function initGlobe(containerId) {
   const container = document.getElementById(containerId);
-  if (!container) {
-    console.error('Globe container not found:', containerId);
+  if (!container) return;
+  if (typeof window.Globe !== 'function') {
+    showGlobeError('The 3D globe library did not load. Check your connection and reload.');
     return;
   }
 
-  globe = Globe()
+  globe = window.Globe()
     .globeImageUrl('https://unpkg.com/three-globe@2.31.3/example/img/earth-blue-marble.jpg')
     .bumpImageUrl('https://unpkg.com/three-globe@2.31.3/example/img/earth-topology.png')
     .backgroundImageUrl('https://unpkg.com/three-globe@2.31.3/example/img/night-sky.png')
     .showAtmosphere(true)
     .atmosphereColor('#4da6ff')
     .atmosphereAltitude(0.15)
+    .pointsData([])
+    .pointLat(d => d.lat)
+    .pointLng(d => d.lng)
+    .pointAltitude(d => d.altitude)
+    .pointColor(d => d.color)
+    .pointRadius(d => d.radius)
+    .pointLabel(d => `${d.entry.name || 'Satellite'} · NORAD ${d.norad_id}`)
+    .pointResolution(8)
+    .pointsMerge(false)
+    .pathsData([])
+    .pathPoints(d => d)
+    .pathPointLat(d => d.lat)
+    .pathPointLng(d => d.lng)
+    .pathPointAlt(d => d.alt)
+    .pathColor(() => '#00d4ff')
+    .pathStroke(0.65)
+    .pathDashLength(0.015)
+    .pathDashGap(0.006)
+    .pathDashAnimateTime(12000)
+    .onPointClick(point => selectSatellite(point.norad_id))
     (container);
 
   window.globe = globe;
-
-  const scene = globe.scene();
-
-  pointsGeometry = new THREE.BufferGeometry();
-  positions = new Float32Array(0);
-  colors = new Float32Array(0);
-  sizes = new Float32Array(0);
-  noradIds = new Int32Array(0);
-  valid = new Uint8Array(0);
-
-  pointsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  pointsGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  pointsGeometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
-  pointsGeometry.setAttribute('noradId', new THREE.BufferAttribute(noradIds, 1));
-
-  pointsMaterial = new THREE.ShaderMaterial({
-    uniforms: {},
-    vertexShader: `
-      attribute vec3 position;
-      attribute vec3 color;
-      attribute float size;
-      attribute float noradId;
-      varying vec3 vColor;
-      varying float vNoradId;
-      void main() {
-        vColor = color;
-        vNoradId = noradId;
-        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-        gl_PointSize = size * (300.0 / -mvPosition.z);
-        gl_Position = projectionMatrix * mvPosition;
-      }
-    `,
-    fragmentShader: `
-      varying vec3 vColor;
-      void main() {
-        float r = length(gl_PointCoord - vec2(0.5));
-        if (r > 0.5) discard;
-        float a = 1.0 - smoothstep(0.30, 0.50, r);
-        gl_FragColor = vec4(vColor, a);
-      }
-    `,
-    transparent: true,
-    vertexColors: true,
-  });
-
-  pointsMesh = new THREE.Points(pointsGeometry, pointsMaterial);
-  pointsMesh.frustumCulled = false;
-  scene.add(pointsMesh);
-
-  raycaster = new THREE.Raycaster();
-
-  if (typeof Worker !== 'undefined') {
-    worker = new Worker('/js/workers/satellite-worker.js');
-    worker.onmessage = (e) => {
-      const { type } = e.data;
-      if (type === 'READY') {
-        workerReady = true;
-        console.log(`Catalog worker ready: ${e.data.count} objects`);
-        if (window.globeApp) window.globeApp.onWorkerReady();
-      } else if (type === 'POSITIONS') {
-        onWorkerPositions(e.data);
-      }
-    };
-    worker.onerror = (err) => {
-      console.error('Worker error:', err);
-      workerReady = false;
-      if (window.globeApp) window.globeApp.onWorkerReady();
-    };
-  } else {
-    console.warn('Web Workers not supported');
-    workerReady = false;
-    if (window.globeApp) window.globeApp.onWorkerReady();
-  }
-
-  const onResize = () => {
-    globe.width(container.clientWidth);
-    globe.height(container.clientHeight);
+  const resize = () => {
+    const width = container.clientWidth || window.innerWidth;
+    const height = container.clientHeight || window.innerHeight;
+    globe.width(width).height(height);
   };
-  window.addEventListener('resize', onResize);
-  onResize();
-
+  window.addEventListener('resize', resize);
+  requestAnimationFrame(resize);
   const controls = globe.controls();
   controls.autoRotate = true;
   controls.autoRotateSpeed = 0.3;
-
-  // Zoom limits: just above the surface out to about GEO distance
-  // (GEO radius ≈ 42,164 km ≈ 6.6 Earth radii).
   controls.minDistance = 1.02;
   controls.maxDistance = 6.6;
+  globe.pointOfView({ lat: 20, lng: 0, altitude: 1.45 }, 0);
 
-  // Start close enough that Earth fills most of the screen.
-  globe.pointOfView({ lat: 20, lng: 0, altitude: 1.45 }, 1500);
-
-  container.addEventListener('mousemove', (e) => onMouseMove(e, container));
-  container.addEventListener('mousedown', (e) => onMouseDown(e, container));
-
-  animate();
+  try {
+    worker = new Worker('/js/workers/satellite-worker.js');
+    worker.onmessage = event => {
+      if (event.data.type === 'POSITIONS') renderPositions(event.data);
+    };
+    worker.onerror = error => {
+      console.error('Satellite propagation worker failed:', error);
+      showGlobeError('Satellite positions could not be calculated. The Earth is still available.');
+    };
+  } catch (error) {
+    console.error('Could not start satellite worker:', error);
+  }
 }
 
-/** Upload catalog entries and request initial position computation. */
 export function setCatalog(entries) {
-  catalogEntries = entries || [];
-  visibleIndices = catalogEntries.map((_, i) => i);
-
-  const n = catalogEntries.length;
-  const pos = new Float32Array(n * 3).fill(0);
-  const col = new Float32Array(n * 3);
-  const sz = new Float32Array(n).fill(0.005);
-  const nr = new Int32Array(n);
-  const val = new Uint8Array(n).fill(0);
-
-  for (let i = 0; i < n; i++) {
-    const e = catalogEntries[i];
-    const c = CATEGORY_COLORS[e.category || 'unknown'] || CATEGORY_COLORS.unknown;
-    col[i * 3] = c[0]; col[i * 3 + 1] = c[1]; col[i * 3 + 2] = c[2];
-    nr[i] = e.norad_id || 0;
-  }
-
-  pointsGeometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  pointsGeometry.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  pointsGeometry.setAttribute('size', new THREE.BufferAttribute(sz, 1));
-  pointsGeometry.setAttribute('noradId', new THREE.BufferAttribute(nr, 1));
-  pointsGeometry.attributes.position.needsUpdate = true;
-  pointsGeometry.attributes.color.needsUpdate = true;
-  pointsGeometry.attributes.size.needsUpdate = true;
-  pointsGeometry.attributes.noradId.needsUpdate = true;
-  pointsGeometry.setDrawRange(0, n);
-
-  if (worker && workerReady) {
-    worker.postMessage({ type: 'INIT', catalog: catalogEntries.map(e => ({
-      norad_id: e.norad_id, line1: e.line1 || null, line2: e.line2 || null,
-      category: e.category || 'unknown',
+  catalogEntries = Array.isArray(entries) ? entries : [];
+  visibleEntries = catalogEntries;
+  if (worker && catalogEntries.length) {
+    worker.postMessage({ type: 'INIT', catalog: catalogEntries.map(entry => ({
+      norad_id: entry.norad_id, line1: entry.line1 || null,
+      line2: entry.line2 || null, omm: entry.omm || null,
+      category: entry.category || 'unknown',
     })) });
     worker.postMessage({ type: 'COMPUTE', time: Date.now() });
-  }
-}
-
-/** Apply position data returned by the worker. */
-function onWorkerPositions(data) {
-  if (!pointsGeometry) return;
-  const n = catalogEntries.length;
-  positions = data.positions;
-  colors = data.colors;
-  sizes = data.sizes;
-  valid = data.valid;
-
-  const pos = new Float32Array(n * 3);
-  const col = new Float32Array(n * 3);
-  const sz = new Float32Array(n);
-  const nr = new Int32Array(n);
-
-  for (let i = 0; i < n; i++) {
-    nr[i] = catalogEntries[i].norad_id || 0;
-    if (valid[i]) {
-      pos[i * 3] = positions[i * 3];
-      pos[i * 3 + 1] = positions[i * 3 + 1];
-      pos[i * 3 + 2] = positions[i * 3 + 2];
-      col[i * 3] = colors[i * 3];
-      col[i * 3 + 1] = colors[i * 3 + 1];
-      col[i * 3 + 2] = colors[i * 3 + 2];
-      sz[i] = sizes[i];
-    } else {
-      pos[i * 3] = 0; pos[i * 3 + 1] = 0; pos[i * 3 + 2] = -2;
-      sz[i] = 0;
+    if (!worker.computeTimer) {
+      worker.computeTimer = window.setInterval(() => {
+        worker.postMessage({ type: 'COMPUTE', time: Date.now() });
+      }, 500);
     }
   }
-
-  pointsGeometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  pointsGeometry.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  pointsGeometry.setAttribute('size', new THREE.BufferAttribute(sz, 1));
-  pointsGeometry.setAttribute('noradId', new THREE.BufferAttribute(nr, 1));
-  pointsGeometry.attributes.position.needsUpdate = true;
-  pointsGeometry.attributes.color.needsUpdate = true;
-  pointsGeometry.attributes.size.needsUpdate = true;
-  pointsGeometry.attributes.noradId.needsUpdate = true;
-  updatePointsVisibility();
 }
 
-/** Apply category / regime / object-type filters. */
+function renderPositions(data) {
+  if (!globe) return;
+  const points = [];
+  for (let i = 0; i < catalogEntries.length; i++) {
+    if (!data.valid[i]) continue;
+    const x = data.positions[i * 3];
+    const y = data.positions[i * 3 + 1];
+    const z = data.positions[i * 3 + 2];
+    const radius = Math.hypot(x, y, z);
+    points.push({
+      norad_id: catalogEntries[i].norad_id,
+      lat: Math.asin(y / radius) * 180 / Math.PI,
+      lng: Math.atan2(z, -x) * 180 / Math.PI,
+      altitude: Math.max(0.003, radius - 1),
+      color: CATEGORY_COLORS[catalogEntries[i].category] || CATEGORY_COLORS.unknown,
+      radius: Math.max(0.08, data.sizes[i] * 12),
+      entry: catalogEntries[i],
+    });
+  }
+  propagatedPoints = points;
+  applyPointVisibility();
+}
+
 export function setFilters(filters) {
-  visibleIndices = [];
-  for (let i = 0; i < catalogEntries.length; i++) {
-    const e = catalogEntries[i];
-    if (filters.category && filters.category.size > 0 && !filters.category.has(e.category || 'unknown')) continue;
-    if (filters.regime && filters.regime.size > 0 && !filters.regime.has(e.orbit_regime || 'unknown')) continue;
-    if (filters.objectType && filters.objectType.size > 0) {
-      const ot = (e.object_type || 'UNK').replace(/\s+/g, '_').toUpperCase();
-      if (!filters.objectType.has(ot)) continue;
-    }
-    visibleIndices.push(i);
-  }
-  updatePointsVisibility();
+  activeFilters = filters || {};
+  applyCatalogVisibility();
 }
 
-/** Apply search text filter. */
 export function setSearch(query) {
-  const q = (query || '').toLowerCase().trim();
-  visibleIndices = [];
-  for (let i = 0; i < catalogEntries.length; i++) {
-    const e = catalogEntries[i];
-    const haystack = [
-      e.name || '', String(e.norad_id || ''), e.intl_designator || '',
-      e.country || '', e.object_type || '',
-    ].join(' ').toLowerCase();
-    if (!q || haystack.includes(q)) visibleIndices.push(i);
-  }
-  updatePointsVisibility();
+  activeSearch = (query || '').toLowerCase().trim();
+  applyCatalogVisibility();
 }
 
-/** Show only visible indices; hide others inside the earth. */
-function updatePointsVisibility() {
-  if (!pointsGeometry || !pointsGeometry.attributes.position) return;
-  const n = catalogEntries.length;
-  const posAttr = pointsGeometry.attributes.position;
-  const sizeAttr = pointsGeometry.attributes.size;
-  const visibleSet = new Set(visibleIndices);
-
-  for (let i = 0; i < n; i++) {
-    if (!visibleSet.has(i)) {
-      posAttr.setXYZ(i, 0, 0, -2);
-      sizeAttr.setX(i, 0);
+function applyCatalogVisibility() {
+  const filters = activeFilters;
+  visibleEntries = catalogEntries.filter(entry => {
+    if (activeSearch && ![entry.name, entry.norad_id, entry.intl_designator,
+      entry.country, entry.object_type].join(' ').toLowerCase().includes(activeSearch)) return false;
+    if (filters.category?.size && !filters.category.has(entry.category || 'unknown')) return false;
+    if (filters.regime?.size && !filters.regime.has(entry.orbit_regime || 'unknown')) return false;
+    if (filters.objectType?.size) {
+      const type = (entry.object_type || 'UNK').replace(/\s+/g, '_').toUpperCase();
+      if (!filters.objectType.has(type)) return false;
     }
-  }
-  posAttr.needsUpdate = true;
-  sizeAttr.needsUpdate = true;
+    if (filters.country?.size && !filters.country.has(entry.country || 'unknown')) return false;
+    return true;
+  });
+  applyPointVisibility();
 }
 
-/** Select a satellite: draw orbit + notify app. */
+function applyPointVisibility() {
+  if (globe) globe.pointsData(propagatedPoints.filter(point => visibleEntries.includes(point.entry)));
+}
+
 export function selectSatellite(noradId) {
   selectedNorad = noradId;
-  const entry = catalogEntries.find(e => e.norad_id === noradId);
+  const entry = catalogEntries.find(item => Number(item.norad_id) === Number(noradId));
   if (!entry) return;
-  if (window.globeApp && window.globeApp.fetchAndDrawTrack) {
-    window.globeApp.fetchAndDrawTrack(noradId);
-  }
-  if (window.globeApp && window.globeApp.onSatelliteSelected) {
-    window.globeApp.onSatelliteSelected(entry);
-  }
+  window.globeApp?.fetchAndDrawTrack?.(noradId);
+  window.globeApp?.onSatelliteSelected?.(entry);
 }
-
-/** Set hovered satellite for tooltip. */
-export function hoverSatellite(noradId) {
-  hoveredNorad = noradId;
-}
-
+export function hoverSatellite() {}
 export function getSelectedNorad() { return selectedNorad; }
-export function getHoveredNorad() { return hoveredNorad; }
+export function getHoveredNorad() { return null; }
 export function getCatalog() { return catalogEntries; }
+export function updateSatMarker() {}
 
-/** Legacy: single-satellite marker (kept for backward compatibility). */
-export function updateSatMarker(lat, lon, alt, name) {
-  const altScale = alt / 6371 + 0.005;
-  satMarkerData.length = 0;
-  satMarkerData.push({ lat, lng: lon, alt: altScale, name: `${name}\n${alt.toFixed(1)} km` });
-  if (followMode) followSatellite(lat, lon);
-}
-
-/** Legacy: draw orbit path. */
 export function drawOrbitPath(points) {
-  if (!points || points.length === 0) return;
+  if (!globe) return;
   const segments = [];
-  let currentSegment = [];
-  for (let i = 0; i < points.length; i++) {
-    const p = points[i];
-    const altScale = p.altitude_km / 6371 + 0.005;
-    currentSegment.push([p.latitude, p.longitude, altScale]);
-    if (i < points.length - 1) {
-      const nextP = points[i + 1];
-      if (Math.abs(nextP.longitude - p.longitude) > 180) {
-        segments.push(currentSegment);
-        currentSegment = [];
-      }
+  let segment = [];
+  (points || []).forEach((point, index, all) => {
+    segment.push({ lat: point.latitude, lng: point.longitude,
+      alt: Math.max(0.003, (point.altitude_km || 0) / 6371) });
+    if (index < all.length - 1 && Math.abs(all[index + 1].longitude - point.longitude) > 180) {
+      if (segment.length > 1) segments.push(segment);
+      segment = [];
     }
-  }
-  if (currentSegment.length > 0) segments.push(currentSegment);
-  orbitPathData.length = 0;
-  segments.forEach(seg => orbitPathData.push(seg));
+  });
+  if (segment.length > 1) segments.push(segment);
+  globe.pathsData(segments);
 }
-
-/** Point camera at lat/lon. */
 export function followSatellite(lat, lon) {
   if (globe) globe.pointOfView({ lat, lng: lon, altitude: 1.8 }, 1000);
 }
-
-/** Toggle follow mode. */
 export function setFollowMode(on) {
   followMode = on;
-  if (globe) globe.controls().autoRotate = !on;
+  if (globe) globe.controls().autoRotate = !followMode;
 }
 
-/** Mouse move → hover pick. */
-function onMouseMove(e, container) {
-  const rect = container.getBoundingClientRect();
-  mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-  mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-  pickPoint();
-}
-
-/** Mouse down → select pick. */
-function onMouseDown(e, container) {
-  const rect = container.getBoundingClientRect();
-  mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-  mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-  const noradId = pickPoint();
-  if (noradId !== null) {
-    selectSatellite(noradId);
-  }
-}
-
-/** Raycast against Points geometry; return hovered NORAD id. */
-function pickPoint() {
-  if (!pointsMesh || !pointsGeometry.attributes.position) return null;
-  const camera = globe.controls ? globe.controls().object : null;
-  if (!camera) return null;
-  raycaster.setFromCamera(mouse, camera);
-  const intersects = raycaster.intersectObject(pointsMesh, false);
-  if (intersects.length === 0) {
-    if (hoveredNorad !== null) hoverSatellite(null);
-    return null;
-  }
-  let hitNorad = null;
-  let hitDist = Infinity;
-  for (const hit of intersects) {
-    const idx = hit.index;
-    if (idx === undefined || idx < 0 || idx >= catalogEntries.length) continue;
-    const noradId = catalogEntries[idx].norad_id;
-    if (hit.distance < hitDist) {
-      hitDist = hit.distance;
-      hitNorad = noradId;
-    }
-  }
-  if (hitNorad !== hoveredNorad) hoverSatellite(hitNorad);
-  return hitNorad;
-}
-
-/** Animation loop: update positions each tick. */
-function animate() {
-  requestAnimationFrame(animate);
-  const now = Date.now();
-  if (!animate.lastTick) animate.lastTick = now;
-  if (worker && workerReady && now - animate.lastTick > 200) {
-    animate.lastTick = now;
-    worker.postMessage({ type: 'COMPUTE', time: now });
-  }
-  if (followMode && followTarget && globe) {
-    globe.pointOfView({ lat: followTarget.lat, lng: followTarget.lon, altitude: 1.8 }, 0);
-  }
+function showGlobeError(message) {
+  const overlay = document.getElementById('message-overlay');
+  const title = document.getElementById('overlay-title');
+  const text = document.getElementById('overlay-text');
+  if (!overlay || !title || !text) return;
+  title.textContent = 'Globe unavailable';
+  text.textContent = message;
+  overlay.classList.add('visible');
 }
