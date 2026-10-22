@@ -22,9 +22,6 @@ let altChart = null;
 let altData = [];
 const MAX_ALT_POINTS = 60;
 
-let catalogLoaded = false;
-let followTarget = null;
-
 // Expose callbacks for globe.js
 window.globeApp = {
   onWorkerReady: () => {
@@ -85,14 +82,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   //    Globe already rendered above; catalog updates asynchronously
   try {
     showLoading('Loading satellite catalog…');
-    // Load catalog with fallback; if it fails, fall back to seed data
+    // The backend handles upstream, cache, and bundled seed fallbacks.
     const catalog = await loadCatalogWithFallback();
     // Backend returns {"objects": [...], "count": N, "sources": [...], "updated_at": ...}
     // Frontend expects a list of satellite entries
     const entries = catalog.objects || [];
     globeSetCatalog(entries);
     catalogSetCatalog(entries);
-    catalogLoaded = true;
     const staleText = catalog.stale ? ' (stale)' : '';
     hideLoading(`Catalog loaded: ${entries.length} objects from ${catalog.source}${staleText}`);
     // Update source info in bottom status bar
@@ -593,7 +589,7 @@ function showCatalogError(err) {
       Unable to load satellite catalog
     </div>
     <div style="font-size: 0.85rem; margin-bottom: 16px; color: var(--text-dim);">
-      ${err.message || err.toString()}
+      ${escapeHtml(err.message || err.toString())}
     </div>
     <button id="retry-catalog" style="
       background: var(--accent);
@@ -620,7 +616,6 @@ function showCatalogError(err) {
         const entries = catalog.objects || [];
         globeSetCatalog(entries);
         catalogSetCatalog(entries);
-        catalogLoaded = true;
         const staleText = catalog.stale ? ' (stale)' : '';
         hideLoading(`Catalog loaded: ${entries.length} objects from ${catalog.source}${staleText}`);
         if (document.getElementById('source-info')) {
@@ -637,49 +632,18 @@ function showCatalogError(err) {
 }
 
 /**
- * Load catalog with fallback and timeout.
- * Falls back through: CelesTrak → in-memory cache → disk cache → seed file
+ * Load the catalog from the backend, which handles upstream, cache, and
+ * bundled OMM seed fallbacks server-side.
  */
 async function loadCatalogWithFallback() {
-  // Try CelesTrak first (respecting 2-hour rate limit)
-  try {
-    const catalog = await apiCatalog(false);
-    if (catalog && catalog.objects && catalog.objects.length > 0) {
-      return { ...catalog, source: 'CelesTrak', stale: false };
-    }
-  } catch (err) {
-    console.warn('CelesTrak failed, falling back:', err.message);
+  const catalog = await apiCatalog(false);
+  if (!catalog || !Array.isArray(catalog.objects) || catalog.objects.length === 0) {
+    throw new Error('The backend returned an empty satellite catalog. Check its catalog source and bundled seed data.');
   }
-
-  // Fall back to in-memory cache, disk cache, or seed data
-  const cached = getCachedCatalog();
-  if (cached && cached.objects && cached.objects.length > 0) {
-    return { ...cached, source: 'Cache', stale: true };
-  }
-
-  // Fall back to bundled seed data
-  try {
-    const seed = await import('../backend/data/catalog_seed.json');
-    if (seed.default && seed.default.objects && seed.default.objects.length > 0) {
-      return { ...seed.default, source: 'Seed', stale: true };
-    }
-  } catch (err) {
-    console.warn('Seed data not available:', err.message);
-  }
-
-  // Last resort: empty catalog
-  return { objects: [], count: 0, source: 'None', stale: true };
-}
-
-/**
- * Get catalog from memory/cache storage
- */
-function getCachedCatalog() {
-  // Check for cached catalog in various storage locations
-  if (typeof window !== 'undefined' && window.cachedCatalog) {
-    return window.cachedCatalog;
-  }
-  return null;
+  const source = catalog.source || (Array.isArray(catalog.sources) && catalog.sources.length
+    ? catalog.sources.join(', ')
+    : 'Backend');
+  return { ...catalog, source, stale: Boolean(catalog.stale) };
 }
 
 /**

@@ -63,32 +63,14 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
     tags=["Diagnostics"],
 )
 async def health_check():
-    """Verify backend health and return catalog status."""
-    # Check if KeepTrack key is configured
-    key_configured = bool(KEEPTRACK_API_KEY)
-
-    # Try to get catalog info for count and source
-    try:
-        from .catalog_service import get_catalog
-        cat_data = get_catalog(force_refresh=False)
-        catalog_count = cat_data.get("count", 0)
-        source = cat_data.get("source", "None")
-        # Get last refresh from updated_at or timestamp
-        last_refresh = cat_data.get("updated_at") or cat_data.get("timestamp")
-        if last_refresh is None:
-            last_refresh = None
-    except Exception:
-        catalog_count = 0
-        source = "None"
-        last_refresh = None
-
+    """Report process health without waiting for any upstream catalog API."""
     return HealthResponse(
         status="ok",
         timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        catalog_count=catalog_count,
-        source=source,
-        last_refresh=last_refresh,
-        key_configured=key_configured,
+        catalog_count=None,
+        source=None,
+        last_refresh=None,
+        key_configured=bool(KEEPTRACK_API_KEY),
     )
 
 

@@ -57,6 +57,17 @@ class TestDiagnostics:
         assert data["status"] == "ok"
         assert "timestamp" in data
 
+    def test_health_endpoint_does_not_fetch_catalog(self, monkeypatch):
+        """Render's health probe must stay fast even when catalog sources are down."""
+        def unexpected_catalog_fetch(*args, **kwargs):
+            pytest.fail("Health check should not make an upstream catalog request")
+
+        monkeypatch.setattr("backend.main.get_catalog", unexpected_catalog_fetch)
+        monkeypatch.setattr("backend.catalog_service.get_catalog", unexpected_catalog_fetch)
+        resp = client.get("/api/health")
+        assert resp.status_code == 200
+        assert resp.json()["catalog_count"] is None
+
     def test_satellites_list_endpoint(self):
         resp = client.get("/api/satellites")
         assert resp.status_code == 200

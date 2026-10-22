@@ -2,8 +2,6 @@
 
 A high-performance real-time satellite tracking web application. Select any satellite (defaults to the **International Space Station**, NORAD ID `25544`) to view a photorealistic, rotating 3D Earth globe, live sub-satellite coordinates, forward azimuth heading, full Keplerian orbital elements, and altitude-over-time charts.
 
-![Satellite Orbit Tracker Interface](docs/screenshot.png)
-
 ---
 
 ## ✨ Features
@@ -107,6 +105,24 @@ This verifies:
 2. ISS physical bounds ($\sim 350\text{--}450\text{ km}$ altitude, $\sim 7.5\text{--}7.8\text{ km/s}$ velocity, $\sim 90\text{--}93\text{ min}$ period).
 3. All FastAPI REST endpoints, mock error handling, and 404 responses.
 
+## 🚀 Deploying on Render
+
+This repository is a single FastAPI web service: `backend/main.py` serves both the API and the frontend files, so it does not need a separate static site or database. The root-level `render.yaml` records the production settings for the `main` branch. Its build command installs `requirements.txt`; its start command runs `uvicorn backend.main:app` on Render's assigned `$PORT`; and its health check uses `/api/health`.
+
+If the existing Render service is not managed by a Blueprint, set these values in **Settings → Build & Deploy**:
+
+| Setting | Value |
+| --- | --- |
+| Repository | `numa-here/satellite-orbit-tracker` |
+| Branch | `main` |
+| Root Directory | `.` (repository root) |
+| Runtime | Python 3 |
+| Build Command | `pip install -r requirements.txt` |
+| Start Command | `uvicorn backend.main:app --host 0.0.0.0 --port $PORT` |
+| Health Check Path | `/api/health` |
+
+Set `PYTHON_VERSION` to `3.13.5` in the service environment. No database or API key is required for the default CelesTrak catalog path; `KEEPTRACK_API_KEY` is optional. Never put a real key in `render.yaml` or commit it to Git. Render does not automatically apply a Blueprint file to a dashboard-managed service: connect or sync the Blueprint in Render, or enter the settings above in the existing service.
+
 ---
 
 ## 📁 Repository Structure
@@ -114,30 +130,38 @@ This verifies:
 ```
 satellite-orbit-tracker/
 ├── README.md                 # Project documentation & quickstart
+├── render.yaml               # Render Blueprint for the main FastAPI service
 ├── .gitignore                # Git exclusions
 ├── requirements.txt          # Python dependencies
-├── .env.example              # Environment variables template
+├── .env.example              # Optional environment variables template
 ├── backend/
-│   ├── __init__.py           # Package marker
-│   ├── main.py               # FastAPI application & route controllers
-│   ├── config.py             # Server constants & CelesTrak settings
-│   ├── tle_service.py        # CelesTrak fetcher & disk caching
-│   ├── propagation.py        # Skyfield & SGP4 orbital mechanics
-│   ├── schemas.py            # Pydantic models for responses
-│   └── cache/                # Gitignored local cache directory
+│   ├── __init__.py           # Python package marker
+│   ├── main.py               # FastAPI application, API routes, and frontend host
+│   ├── config.py             # Server constants and public data-source settings
+│   ├── catalog_service.py    # Full catalog, upstream merge, cache, and fallback
+│   ├── tle_service.py        # CelesTrak fetcher and disk caching
+│   ├── propagation.py        # Skyfield / SGP4 orbital mechanics
+│   ├── seed_data.py          # Bundled OMM fallback for popular satellites
+│   └── schemas.py            # Pydantic response models
 ├── frontend/
 │   ├── index.html            # Main web layout
 │   ├── css/
 │   │   └── style.css         # Space-themed responsive UI
 │   └── js/
-│       ├── api.js            # Asynchronous API client
-│       ├── globe.js          # globe.gl 3D canvas manager
-│       ├── panel.js          # Telemetry and HUD DOM controller
-│       └── app.js            # Application bootstrap & polling loops
+│       ├── api.js            # Same-origin asynchronous API client
+│       ├── app.js            # Application bootstrap and polling loops
+│       ├── catalog-ui.js     # Catalog search and filters
+│       ├── globe.js          # 3D globe and interactive Earth fallback
+│       ├── panel.js          # Telemetry, time controls, and charts
+│       └── workers/
+│           └── satellite-worker.js # Client-side satellite propagation
 ├── tests/
 │   ├── __init__.py           # Package marker
 │   ├── test_propagation.py   # SGP4 propagation unit tests
+│   ├── test_catalog_merge.py # Catalog merge and deduplication tests
 │   └── test_api.py           # FastAPI integration tests
+├── scripts/
+│   └── check_secrets.sh      # Secret scanning helper
 └── docs/
     └── ABOUT.md              # In-depth orbital mechanics reference
 ```

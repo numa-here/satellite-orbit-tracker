@@ -98,8 +98,8 @@ class HealthResponse(BaseModel):
     """Response returned by GET /api/health."""
     status: str = Field("ok", description="Server status")
     timestamp: str = Field(..., description="Current UTC timestamp")
-    catalog_count: int = Field(0, description="Number of objects in the satellite catalog")
-    source: str = Field("None", description="Data source: keeptrack, celestrak, cache, or seed")
+    catalog_count: Optional[int] = Field(None, description="Catalog count when already known; health checks do not fetch the catalog")
+    source: Optional[str] = Field(None, description="Catalog source when already known; health checks do not fetch the catalog")
     last_refresh: Optional[str] = Field(None, description="ISO-8601 timestamp of last catalog refresh")
     key_configured: bool = Field(False, description="True if KeepTrack API key is configured")
 

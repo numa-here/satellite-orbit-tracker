@@ -393,9 +393,20 @@ def build_catalog() -> Dict[str, Any]:
 def get_catalog(force_refresh: bool = False) -> Dict[str, Any]:
     cache_key = "catalog_v1"
     cached = _read_cache(cache_key)
+    cached_data = cached.get("data", {}) if isinstance(cached, dict) else {}
+    if not isinstance(cached_data, dict):
+        cached_data = {}
+    has_cached_objects = (
+        isinstance(cached_data.get("objects"), list)
+        and len(cached_data["objects"]) > 0
+    )
 
-    if not force_refresh and cached and _is_fresh_ttl(cached, CATALOG_CACHE_TTL_SECONDS):
-        data = cached.get("data", {})
+    if (
+        not force_refresh
+        and has_cached_objects
+        and _is_fresh_ttl(cached, CATALOG_CACHE_TTL_SECONDS)
+    ):
+        data = dict(cached_data)
         data["cached"] = True
         data["stale"] = False
         # Ensure source field is set
@@ -405,6 +416,8 @@ def get_catalog(force_refresh: bool = False) -> Dict[str, Any]:
 
     try:
         data = build_catalog()
+        if not data.get("objects"):
+            raise CatalogError("Upstream providers returned an empty satellite catalog")
         _write_cache(cache_key, {"timestamp": time.time(), "data": data})
         data["cached"] = False
         data["stale"] = False
@@ -414,8 +427,8 @@ def get_catalog(force_refresh: bool = False) -> Dict[str, Any]:
         return data
     except Exception as exc:
         logger.exception("Catalog build failed")
-        if cached:
-            data = cached.get("data", {})
+        if has_cached_objects:
+            data = dict(cached_data)
             data["cached"] = True
             data["stale"] = True
             # Ensure source field is set

@@ -109,6 +109,26 @@ def test_catalog_missing_satcat_rows_remain_valid(monkeypatch):
     assert entry["orbit_regime"] == "LEO"
 
 
+def test_empty_upstream_and_empty_cache_fall_back_to_omm_seed(monkeypatch):
+    from backend import catalog_service
+
+    monkeypatch.setattr(
+        catalog_service,
+        "_read_cache",
+        lambda key: {"timestamp": 1, "data": {"objects": [], "count": 0}},
+    )
+    monkeypatch.setattr(catalog_service, "_is_fresh_ttl", lambda *args: True)
+    monkeypatch.setattr(catalog_service, "build_catalog", lambda: {"objects": [], "count": 0})
+    monkeypatch.setattr(catalog_service, "_write_cache", lambda key, payload: None)
+
+    data = catalog_service.get_catalog()
+
+    assert data["source"] == "Seed"
+    assert data["stale"] is True
+    assert data["count"] > 0
+    assert all(entry["omm"] for entry in data["objects"])
+
+
 def test_catalog_endpoint_mocked():
     fake_response = CatalogResponse(
         objects=[
