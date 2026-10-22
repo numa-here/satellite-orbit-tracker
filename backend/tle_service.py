@@ -63,12 +63,13 @@ def _read_cache(key: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _write_cache(key: str, data: Any) -> None:
+def _write_cache(key: str, data: Any, **metadata: Any) -> None:
     """Store data payload with current timestamp to file cache."""
     path = _get_cache_path(key)
     payload = {
         "timestamp": time.time(),
         "data": data,
+        **metadata,
     }
     try:
         with open(path, "w", encoding="utf-8") as f:
@@ -188,7 +189,12 @@ def fetch_group(group: str) -> Dict[str, Any]:
     cached = _read_cache(cache_key)
 
     if cached and _is_fresh(cached):
-        return {"data": cached["data"], "stale": False, "cached": True}
+        return {
+            "data": cached["data"],
+            "stale": False,
+            "cached": True,
+            "provider": cached.get("provider", "celestrak"),
+        }
 
     last_network_exc = None
     for endpoint in CELESTRAK_ENDPOINTS:
@@ -205,16 +211,40 @@ def fetch_group(group: str) -> Dict[str, Any]:
             parsed = resp.json()
             sat_list = parsed if isinstance(parsed, list) else [parsed]
 
-            _write_cache(cache_key, sat_list)
-            return {"data": sat_list, "stale": False, "cached": False}
+            _write_cache(cache_key, sat_list, provider="celestrak")
+            return {"data": sat_list, "stale": False, "cached": False, "provider": "celestrak"}
         except ValueError:
             raise
         except Exception as exc:
             last_network_exc = exc
             logger.warning("CelesTrak endpoint '%s' failed for group '%s': %s", endpoint, group, exc)
 
+    # ReTLEctor mirrors CelesTrak's public GP groups and keeps a short-lived
+    # cache of its own. Use it when the app host cannot reach CelesTrak.
+    try:
+        mirror = requests.get(
+            f"https://retlector.eu/{clean_group}/json",
+            headers=REQUEST_HEADERS,
+            timeout=(3, 8),
+        )
+        mirror.raise_for_status()
+        parsed = mirror.json()
+        sat_list = parsed if isinstance(parsed, list) else [parsed]
+        sat_list = [item for item in sat_list if isinstance(item, dict)]
+        if sat_list:
+            _write_cache(cache_key, sat_list, provider="retlector")
+            return {"data": sat_list, "stale": False, "cached": False, "provider": "retlector"}
+    except Exception as exc:
+        last_network_exc = exc
+        logger.warning("ReTLEctor mirror failed for group '%s': %s", group, exc)
+
     if cached:
-        return {"data": cached["data"], "stale": True, "cached": True}
+        return {
+            "data": cached["data"],
+            "stale": True,
+            "cached": True,
+            "provider": cached.get("provider", "celestrak"),
+        }
 
     raise ConnectionError(
         f"Cannot reach CelesTrak and no cache exists for group '{group}'"

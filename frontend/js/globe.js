@@ -31,10 +31,9 @@ export function initGlobe(containerId) {
     showGlobeError('The local 3D renderer did not load. Reload the page or check the deployment static files.');
   } else {
     try {
-    globe = window.Globe()
+    globe = window.Globe({ rendererConfig: { alpha: true, antialias: true } })
       .globeImageUrl('/vendor/earth-blue-marble.jpg')
       .bumpImageUrl('/vendor/earth-topology.png')
-      .backgroundImageUrl('/vendor/night-sky.png')
       .showGlobe(true)
       .showAtmosphere(true)
       .atmosphereColor('#4da6ff')

@@ -339,6 +339,7 @@ def build_catalog(limit: Optional[int] = None, offset: int = 0) -> Dict[str, Any
     # timeouts that leave hosted users staring at an empty loading screen.
     celestrak_ok = False
     celestrak_present = False
+    retlector_present = False
     with ThreadPoolExecutor(max_workers=min(8, max(1, len(CELESTRAK_GP_GROUPS)))) as pool:
         futures = {pool.submit(fetch_group, group): group for group in CELESTRAK_GP_GROUPS}
         for future in as_completed(futures):
@@ -351,14 +352,19 @@ def build_catalog(limit: Optional[int] = None, offset: int = 0) -> Dict[str, Any
             sat_list = result.get("data") if isinstance(result, dict) else result
             if not isinstance(sat_list, list):
                 continue
+            provider = result.get("provider", "celestrak") if isinstance(result, dict) else "celestrak"
             if sat_list:
-                celestrak_present = True
+                if provider == "retlector":
+                    retlector_present = True
+                else:
+                    celestrak_present = True
             group_stale = bool(isinstance(result, dict) and result.get("stale"))
             if sat_list and not group_stale:
                 celestrak_ok = True
             for sat_data in sat_list:
                 entry = _normalize_omm(sat_data, group)
                 if entry and entry.norad_id not in items:
+                    entry.source = provider
                     entry.stale = group_stale
                     items[entry.norad_id] = entry
 
@@ -377,6 +383,8 @@ def build_catalog(limit: Optional[int] = None, offset: int = 0) -> Dict[str, Any
 
     if celestrak_present:
         sources.append("celestrak")
+    if retlector_present:
+        sources.append("retlector")
     if seed_used:
         sources.append("seed")
 

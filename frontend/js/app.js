@@ -11,9 +11,9 @@ import {
   followSatellite, setFollowMode, getCatalog, getSelectedNorad,
   setSimulationRate, setSimulationTime, setSatellitesVisible, setEarthVisible,
   zoomIn, zoomOut, undoCamera, redoCamera,
-} from './globe.js?v=orbit-globe-20261022-3';
+} from './globe.js?v=orbit-globe-20261022-4';
 
-import { initCatalogUI, setCatalog as catalogSetCatalog } from './catalog-ui.js?v=orbit-globe-20261022-3';
+import { initCatalogUI, setCatalog as catalogSetCatalog } from './catalog-ui.js?v=orbit-globe-20261022-4';
 
 // --- State -----------------------------------------------------------------
 
@@ -306,6 +306,18 @@ function setupPanelTriggers() {
   document.querySelectorAll('.tab-btn').forEach(button => {
     button.addEventListener('click', () => window.switchInfoTab?.(button.dataset.tab));
   });
+  document.getElementById('copy-tle')?.addEventListener('click', async () => {
+    const text = document.getElementById('info-tle-data')?.textContent || '';
+    try {
+      await navigator.clipboard.writeText(text);
+      const button = document.getElementById('copy-tle');
+      button.textContent = 'Copied';
+      setTimeout(() => { button.textContent = 'Copy elements'; }, 1400);
+    } catch (_) {
+      const button = document.getElementById('copy-tle');
+      if (button) button.textContent = 'Select and copy the text above';
+    }
+  });
   window.switchInfoTab?.('overview');
 
   // Click outside a panel closes it
@@ -425,23 +437,35 @@ async function loadSatellite(noradId) {
   showLoading(`Loading satellite ${noradId}…`);
   hideError();
   altData = [];
+  const entry = getCatalog().find(item => Number(item.norad_id) === Number(noradId));
+  if (entry) window.updateInfoPanel?.(entry, null, null);
 
   try {
-    // Fetch position, track, and elements in parallel
-    const [pos, track, elems] = await Promise.all([
+    const [positionResult, trackResult, elementsResult] = await Promise.allSettled([
       apiPosition(noradId),
       apiTrack(noradId, 90, 30),
       apiElements(noradId),
     ]);
+    const pos = positionResult.status === 'fulfilled'
+      ? positionResult.value
+      : propagateOmmPosition(entry, Date.now());
+    if (!pos) throw positionResult.status === 'rejected'
+      ? positionResult.reason
+      : new Error('No orbital elements are available for this satellite.');
+    const track = trackResult.status === 'fulfilled'
+      ? trackResult.value
+      : { points: propagateOmmTrack(entry, pos.utc_time) };
+    const elems = elementsResult.status === 'fulfilled'
+      ? elementsResult.value
+      : orbitalElementsFromOmm(entry);
 
     // Update globe
     updateSatMarker(pos.latitude, pos.longitude, pos.altitude_km, pos.name);
-    drawOrbitPath(track.points);
+    if (track.points?.length) drawOrbitPath(track.points);
 
     // Update info panel
     updatePositionPanel(pos);
     updateElementsPanel(elems);
-    const entry = getCatalog().find(item => Number(item.norad_id) === Number(noradId));
     window.updateInfoPanel?.(entry, pos, elems);
 
     // Update bottom-left HUD
@@ -450,7 +474,8 @@ async function loadSatellite(noradId) {
     // Seed the altitude chart
     addAltitudePoint(pos.utc_time, pos.altitude_km);
 
-    hideLoading(`Tracking: ${pos.name}`);
+    const fallback = positionResult.status === 'rejected' ? ' · local OMM propagation' : '';
+    hideLoading(`Tracking: ${pos.name}${fallback}`);
   } catch (err) {
     console.error('Failed to load satellite:', err);
     if (err.message.includes('not found')) {
@@ -465,17 +490,89 @@ async function loadSatellite(noradId) {
 // Polling
 // ==========================================================================
 
+function createOmmSatrec(entry) {
+  if (!entry?.omm || typeof window.satellite?.json2satrec !== 'function') return null;
+  try { return window.satellite.json2satrec(entry.omm); } catch (_) { return null; }
+}
+
+function propagateOmmPosition(entry, timeMs) {
+  const satrec = createOmmSatrec(entry);
+  if (!satrec) return null;
+  try {
+    const date = new Date(timeMs);
+    const result = window.satellite.propagate(satrec, date);
+    if (!result?.position || !result?.velocity) return null;
+    const geo = window.satellite.eciToGeodetic(result.position, window.satellite.gstime(date));
+    if (!geo) return null;
+    const epoch = entry.omm.EPOCH || null;
+    const ageDays = epoch ? (date.getTime() - Date.parse(epoch)) / 86400000 : null;
+    return {
+      name: entry.name, norad_id: entry.norad_id,
+      latitude: geo.latitude * 180 / Math.PI,
+      longitude: window.satellite.degreesLong(geo.longitude),
+      altitude_km: geo.height,
+      velocity_km_s: Math.hypot(result.velocity.x, result.velocity.y, result.velocity.z),
+      heading_degrees: null, direction: '', utc_time: date.toISOString(),
+      tle_epoch: epoch, tle_age_days: Number.isFinite(ageDays) ? ageDays : null,
+      stale_tle: Boolean(entry.stale) || (Number.isFinite(ageDays) && ageDays > 7),
+      stale_warning: entry.stale ? 'Catalog is using a cached or bundled orbital record.' : null,
+    };
+  } catch (_) { return null; }
+}
+
+function propagateOmmTrack(entry, startTime) {
+  const satrec = createOmmSatrec(entry);
+  const meanMotion = Number(entry?.omm?.MEAN_MOTION);
+  if (!satrec || !(meanMotion > 0)) return [];
+  const start = Date.parse(startTime) || Date.now();
+  const periodMinutes = 1440 / meanMotion;
+  const points = [];
+  for (let i = 0; i <= 120; i++) {
+    const date = new Date(start + periodMinutes * 60000 * i / 120);
+    try {
+      const result = window.satellite.propagate(satrec, date);
+      if (!result?.position) continue;
+      const geo = window.satellite.eciToGeodetic(result.position, window.satellite.gstime(date));
+      if (geo) points.push({ lat: geo.latitude * 180 / Math.PI, lng: window.satellite.degreesLong(geo.longitude), alt: Math.max(0.0005, geo.height / 6371) });
+    } catch (_) { /* Skip invalid points while retaining the rest of the orbit. */ }
+  }
+  return points;
+}
+
+function orbitalElementsFromOmm(entry) {
+  const omm = entry?.omm;
+  if (!omm) return null;
+  const meanMotion = Number(omm.MEAN_MOTION);
+  const eccentricity = Number(omm.ECCENTRICITY);
+  const semiMajorKm = meanMotion > 0 ? Math.cbrt(398600.8 / Math.pow(meanMotion * 2 * Math.PI / 86400, 2)) : NaN;
+  return {
+    inclination_deg: Number(omm.INCLINATION), eccentricity,
+    raan_deg: Number(omm.RA_OF_ASC_NODE), arg_of_perigee_deg: Number(omm.ARG_OF_PERICENTER),
+    mean_anomaly_deg: Number(omm.MEAN_ANOMALY), mean_motion_rev_per_day: meanMotion,
+    orbital_period_minutes: meanMotion > 0 ? 1440 / meanMotion : NaN,
+    apogee_km: Number.isFinite(semiMajorKm) ? semiMajorKm * (1 + eccentricity) - 6378.135 : NaN,
+    perigee_km: Number.isFinite(semiMajorKm) ? semiMajorKm * (1 - eccentricity) - 6378.135 : NaN,
+    bstar: Number(omm.BSTAR),
+  };
+}
+
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
   pollTimer = setInterval(pollPosition, 3000);
 }
 
 async function pollPosition() {
+  const entry = getCatalog().find(item => Number(item.norad_id) === Number(currentSatId));
   try {
-    const pos = await apiPosition(currentSatId);
+    let pos;
+    try {
+      pos = await apiPosition(currentSatId);
+    } catch (err) {
+      pos = propagateOmmPosition(entry, Date.now());
+      if (!pos) throw err;
+    }
     updateSatMarker(pos.latitude, pos.longitude, pos.altitude_km, pos.name);
     updatePositionPanel(pos);
-    const entry = getCatalog().find(item => Number(item.norad_id) === Number(currentSatId));
     window.updateInfoPanel?.(entry, pos, null);
     updateHud(pos);
     addAltitudePoint(pos.utc_time, pos.altitude_km);

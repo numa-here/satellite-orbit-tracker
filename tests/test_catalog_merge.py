@@ -142,6 +142,48 @@ def test_empty_upstream_and_empty_cache_fall_back_to_omm_seed(monkeypatch):
     assert all(entry["omm"] for entry in data["objects"])
 
 
+def test_fetch_group_uses_retlector_mirror_when_celestrak_times_out(monkeypatch):
+    from backend import tle_service
+
+    item = {
+        "OBJECT_NAME": "TEST SATELLITE",
+        "OBJECT_ID": "2024-001A",
+        "EPOCH": "2026-10-21T00:00:00",
+        "MEAN_MOTION": 15.0,
+        "ECCENTRICITY": 0.001,
+        "INCLINATION": 51.6,
+        "RA_OF_ASC_NODE": 20.0,
+        "ARG_OF_PERICENTER": 30.0,
+        "MEAN_ANOMALY": 40.0,
+        "NORAD_CAT_ID": 99999,
+    }
+
+    class Response:
+        text = "json"
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [item]
+
+    monkeypatch.setattr(tle_service, "CELESTRAK_ENDPOINTS", ["https://celestrak.test/gp.php"])
+    monkeypatch.setattr(tle_service, "_read_cache", lambda key: None)
+    monkeypatch.setattr(tle_service, "_write_cache", lambda *args, **kwargs: None)
+
+    def get(url, **kwargs):
+        if "retlector.eu" in url:
+            return Response()
+        raise TimeoutError("CelesTrak unavailable")
+
+    monkeypatch.setattr(tle_service.requests, "get", get)
+    result = tle_service.fetch_group("active")
+
+    assert result["provider"] == "retlector"
+    assert result["data"][0]["NORAD_CAT_ID"] == 99999
+    assert result["stale"] is False
+
+
 def test_catalog_endpoint_mocked():
     fake_response = CatalogResponse(
         objects=[

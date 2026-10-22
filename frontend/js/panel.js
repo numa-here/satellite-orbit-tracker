@@ -11,15 +11,16 @@
  * @param {Object} pos - Position response from the API.
  */
 function updatePositionPanel(pos) {
-  setText('val-lat',       `${pos.latitude.toFixed(4)}°`);
-  setText('val-lon',       `${pos.longitude.toFixed(4)}°`);
-  setText('val-alt',       `${pos.altitude_km.toFixed(2)} km`);
-  setText('val-speed',     `${pos.velocity_km_s.toFixed(3)} km/s`);
-  setText('val-direction', `${pos.heading_degrees.toFixed(1)}° ${pos.direction}`);
+  const fixed = (value, digits, suffix = '') => Number.isFinite(Number(value)) ? `${Number(value).toFixed(digits)}${suffix}` : '—';
+  setText('val-lat',       fixed(pos.latitude, 4, '°'));
+  setText('val-lon',       fixed(pos.longitude, 4, '°'));
+  setText('val-alt',       fixed(pos.altitude_km, 2, ' km'));
+  setText('val-speed',     fixed(pos.velocity_km_s, 3, ' km/s'));
+  setText('val-direction', pos.heading_degrees == null ? '—' : `${fixed(pos.heading_degrees, 1, '°')} ${pos.direction || ''}`);
   setText('val-time',      formatUTC(pos.utc_time));
   setText('val-norad',     pos.norad_id);
   setText('val-epoch',     formatUTC(pos.tle_epoch));
-  setText('val-age',       `${pos.tle_age_days.toFixed(1)} days`);
+  setText('val-age',       fixed(pos.tle_age_days, 1, ' days'));
 
   // Update status badge
   const badge = document.getElementById('status-badge');
@@ -41,14 +42,16 @@ function updatePositionPanel(pos) {
  * @param {Object} elems - OrbitalElements response from the API.
  */
 function updateElementsPanel(elems) {
-  setText('val-inc',    `${elems.inclination_deg.toFixed(4)}°`);
-  setText('val-ecc',    elems.eccentricity.toFixed(7));
-  setText('val-raan',   `${elems.raan_deg.toFixed(4)}°`);
-  setText('val-argp',   `${elems.arg_of_perigee_deg.toFixed(4)}°`);
-  setText('val-ma',     `${elems.mean_anomaly_deg.toFixed(4)}°`);
-  setText('val-mm',     `${elems.mean_motion_rev_per_day.toFixed(8)} rev/day`);
-  setText('val-period', `${elems.orbital_period_minutes.toFixed(2)} min`);
-  setText('val-bstar',  elems.bstar.toExponential(5));
+  if (!elems) return;
+  const fixed = (value, digits, suffix = '') => Number.isFinite(Number(value)) ? `${Number(value).toFixed(digits)}${suffix}` : '—';
+  setText('val-inc',    fixed(elems.inclination_deg, 4, '°'));
+  setText('val-ecc',    fixed(elems.eccentricity, 7));
+  setText('val-raan',   fixed(elems.raan_deg, 4, '°'));
+  setText('val-argp',   fixed(elems.arg_of_perigee_deg, 4, '°'));
+  setText('val-ma',     fixed(elems.mean_anomaly_deg, 4, '°'));
+  setText('val-mm',     fixed(elems.mean_motion_rev_per_day, 8, ' rev/day'));
+  setText('val-period', fixed(elems.orbital_period_minutes, 2, ' min'));
+  setText('val-bstar',  Number.isFinite(Number(elems.bstar)) ? Number(elems.bstar).toExponential(5) : '—');
 }
 
 /**
@@ -425,6 +428,8 @@ function updateInfoPanel(entry, pos, elems) {
     return Number.isFinite(number) ? `${number.toFixed(digits)}${suffix}` : '—';
   };
   if (entry) {
+    const title = document.getElementById('info-panel-title');
+    if (title) title.textContent = `${entry.name || 'Satellite'} · NORAD ${entry.norad_id}`;
     document.getElementById('info-norad').textContent = entry.norad_id || '—';
     document.getElementById('info-desig').textContent = entry.intl_designator || '—';
     document.getElementById('info-country').textContent = entry.country || '—';
@@ -434,6 +439,8 @@ function updateInfoPanel(entry, pos, elems) {
     const status = entry.stale ? 'STALE' : 'LIVE';
     document.getElementById('info-status').textContent = status;
     document.getElementById('info-status').className = 'info-value ' + (entry.stale ? 'stale' : 'live');
+    renderSelectedSatelliteImage(entry);
+    renderElementRecord(entry);
   }
   if (pos) {
     document.getElementById('info-lat').textContent = formatNumber(pos.latitude, 4, '°');
@@ -455,6 +462,54 @@ function updateInfoPanel(entry, pos, elems) {
     document.getElementById('info-apogee').textContent = formatNumber(elems.apogee_km, 1, ' km');
     document.getElementById('info-perigee').textContent = formatNumber(elems.perigee_km, 1, ' km');
   }
+}
+
+let imageLookupNorad = null;
+async function renderSelectedSatelliteImage(entry) {
+  const figure = document.getElementById('satellite-photo');
+  const image = document.getElementById('info-image');
+  const caption = document.getElementById('info-image-caption');
+  if (!figure || !image || !caption || !entry?.norad_id) return;
+  if (imageLookupNorad === entry.norad_id) return;
+  imageLookupNorad = entry.norad_id;
+  figure.hidden = false;
+  image.removeAttribute('src');
+  caption.textContent = 'Looking for a public satellite image…';
+  try {
+    const search = `${entry.name || 'satellite'} satellite spacecraft`;
+    const url = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(search)}&gsrnamespace=6&gsrlimit=5&prop=imageinfo&iiprop=url&iiurlwidth=960&format=json&origin=*`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Image lookup returned ${response.status}`);
+    const data = await response.json();
+    const page = Object.values(data.query?.pages || {})[0];
+    const source = page?.imageinfo?.[0]?.thumburl || page?.imageinfo?.[0]?.url;
+    if (!source) throw new Error('No public image found');
+    image.alt = `${entry.name || 'Satellite'} (image: ${page.title || 'Wikimedia Commons'})`;
+    image.src = source;
+    caption.textContent = `${(page.title || 'Satellite image').replace(/^File:/, '')} · Wikimedia Commons`;
+    image.onerror = () => { image.removeAttribute('src'); caption.textContent = 'No public image is available for this object.'; };
+  } catch (_) {
+    caption.textContent = 'No public image is available for this object.';
+  }
+}
+
+function renderElementRecord(entry) {
+  const output = document.getElementById('info-tle-data');
+  const description = document.getElementById('tle-description');
+  if (!output) return;
+  if (entry.line1 && entry.line2) {
+    output.textContent = `${entry.name || 'SATELLITE'}\n${entry.line1}\n${entry.line2}`;
+    if (description) description.textContent = 'Two-Line Element (TLE) set from the catalog source. Epoch and orbital parameters describe the orbit at the listed reference time.';
+    return;
+  }
+  const omm = entry.omm;
+  if (omm && typeof omm === 'object') {
+    const keys = ['OBJECT_NAME', 'OBJECT_ID', 'EPOCH', 'MEAN_MOTION', 'ECCENTRICITY', 'INCLINATION', 'RA_OF_ASC_NODE', 'ARG_OF_PERICENTER', 'MEAN_ANOMALY', 'BSTAR', 'MEAN_MOTION_DOT', 'MEAN_MOTION_DDOT'];
+    output.textContent = keys.filter(key => omm[key] != null).map(key => `${key}: ${omm[key]}`).join('\n');
+    if (description) description.textContent = 'This source provides CCSDS OMM orbital elements instead of legacy TLE lines. Values below are shown as published; no TLE values are fabricated.';
+    return;
+  }
+  output.textContent = 'Orbital element lines are not available for this catalog entry.';
 }
 
 window.updateInfoPanel = updateInfoPanel;
