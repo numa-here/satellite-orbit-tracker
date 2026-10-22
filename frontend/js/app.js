@@ -11,9 +11,9 @@ import {
   followSatellite, setFollowMode, getCatalog, getSelectedNorad,
   setSimulationRate, setSimulationTime, setSatellitesVisible, setEarthVisible,
   zoomIn, zoomOut, undoCamera, redoCamera,
-} from './globe.js?v=orbit-globe-20261022-5';
+} from './globe.js?v=orbit-globe-20261022-6';
 
-import { initCatalogUI, setCatalog as catalogSetCatalog } from './catalog-ui.js?v=orbit-globe-20261022-5';
+import { initCatalogUI, setCatalog as catalogSetCatalog } from './catalog-ui.js?v=orbit-globe-20261022-6';
 
 // --- State -----------------------------------------------------------------
 
