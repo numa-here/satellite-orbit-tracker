@@ -11,9 +11,9 @@ import {
   followSatellite, setFollowMode, getCatalog, getSelectedNorad,
   setSatellitesVisible, setEarthVisible,
   zoomIn, zoomOut, undoCamera, redoCamera,
-} from './globe.js?v=orbit-globe-20261023-9';
+} from './globe.js?v=orbit-globe-20261023-10';
 
-import { initCatalogUI, setCatalog as catalogSetCatalog } from './catalog-ui.js?v=orbit-globe-20261023-9';
+import { initCatalogUI, setCatalog as catalogSetCatalog } from './catalog-ui.js?v=orbit-globe-20261023-10';
 
 // --- State -----------------------------------------------------------------
 
@@ -264,6 +264,9 @@ function setupPanelTriggers() {
       const wasOpen = panel.classList.contains('visible');
       document.querySelectorAll('.glass-panel').forEach(p => p.classList.remove('visible'));
       if (!wasOpen) panel.classList.add('visible');
+      if (!wasOpen && panelId === 'panel-graphs') {
+        requestAnimationFrame(() => Object.values(window.graphCharts || {}).forEach(chart => chart.resize?.()));
+      }
     });
 
     if (closeBtn) {
@@ -373,13 +376,6 @@ function updateHud(pos) {
   el('hud-height', `${(pos.altitude_km || 0).toFixed(0)} km`);
   el('hud-lat', `${(pos.latitude || 0).toFixed(2)}°`);
   el('hud-lon', `${(pos.longitude || 0).toFixed(2)}°`);
-  const timeLabel = pos.utc_time ? new Date(pos.utc_time).toLocaleTimeString() : '';
-  if (typeof window.addGraphPoint === 'function') {
-    window.addGraphPoint('graph-altitude', timeLabel, pos.altitude_km || 0);
-    window.addGraphPoint('graph-speed', timeLabel, pos.velocity_km_s || 0);
-    window.addGraphPoint('graph-lat', timeLabel, pos.latitude || 0);
-    window.addGraphPoint('graph-lon', timeLabel, pos.longitude || 0);
-  }
 }
 
 function setupPanelTheme() {
@@ -409,7 +405,10 @@ async function loadSatellite(noradId) {
   hideError();
   altData = [];
   const entry = getCatalog().find(item => Number(item.norad_id) === Number(noradId));
-  if (entry) window.updateInfoPanel?.(entry, null, null);
+  if (entry) {
+    window.updateInfoPanel?.(entry, null, null);
+    renderOrbitAnalysis(entry);
+  }
 
   try {
     const [positionResult, trackResult, elementsResult] = await Promise.allSettled([
@@ -525,6 +524,37 @@ function orbitalElementsFromOmm(entry) {
     perigee_km: Number.isFinite(semiMajorKm) ? semiMajorKm * (1 - eccentricity) - 6378.135 : NaN,
     bstar: Number(omm.BSTAR),
   };
+}
+
+// Draw a stable predicted profile for one complete revolution. It updates
+// only when a different satellite is selected, rather than scrolling with
+// the live-position polling timer.
+function renderOrbitAnalysis(entry) {
+  window.setGraphSeries?.({ labels: [], altitude: [], speed: [], latitude: [], longitude: [] });
+  const satrec = createOmmSatrec(entry);
+  if (!satrec || typeof window.satellite?.propagate !== 'function') return;
+  const meanMotion = Number(entry.omm?.MEAN_MOTION) || satrec.no * 1440 / (2 * Math.PI);
+  if (!(meanMotion > 0)) return;
+  const periodMs = 86400000 / meanMotion;
+  const start = Date.now();
+  const labels = [];
+  const altitude = [];
+  const speed = [];
+  const latitude = [];
+  const longitude = [];
+  for (let i = 0; i <= 120; i++) {
+    const date = new Date(start + periodMs * i / 120);
+    const result = window.satellite.propagate(satrec, date);
+    if (!result?.position || !result?.velocity) continue;
+    const geo = window.satellite.eciToGeodetic(result.position, window.satellite.gstime(date));
+    if (!geo) continue;
+    labels.push(`${Math.round(i / 120 * 100)}%`);
+    altitude.push(geo.height);
+    speed.push(Math.hypot(result.velocity.x, result.velocity.y, result.velocity.z));
+    latitude.push(geo.latitude * 180 / Math.PI);
+    longitude.push(window.satellite.degreesLong(geo.longitude));
+  }
+  if (labels.length > 1) window.setGraphSeries?.({ labels, altitude, speed, latitude, longitude });
 }
 
 function startPolling() {

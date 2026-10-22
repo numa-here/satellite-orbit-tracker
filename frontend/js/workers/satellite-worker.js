@@ -15,6 +15,7 @@ importScripts('/vendor/satellite.min.js');
 
 const EARTH_RADIUS_KM = 6371.0;
 let catalog = [];
+let orbitCatalog = [];
 let satrecs = {};
 let ready = false;
 
@@ -22,13 +23,16 @@ self.addEventListener('message', (e) => {
   const { type } = e.data;
   if (type === 'INIT') {
     catalog = e.data.catalog || [];
+    orbitCatalog = e.data.orbitCatalog || catalog;
     satrecs = {};
-    for (const entry of catalog) {
+    const records = new Map([...catalog, ...orbitCatalog].map(entry => [entry.norad_id, entry]));
+    for (const entry of records.values()) {
       const satrec = buildSatrec(entry);
       if (satrec) satrecs[entry.norad_id] = satrec;
     }
     ready = true;
     self.postMessage({ type: 'READY', count: Object.keys(satrecs).length });
+    computeOrbitPaths();
   } else if (type === 'COMPUTE') {
     if (!ready) return;
     computePositions(e.data.time);
@@ -62,6 +66,55 @@ function computePositions(timeMs) {
   self.postMessage({
     type: 'POSITIONS', positions, colors, sizes, valid,
   }, [positions.buffer, colors.buffer, sizes.buffer, valid.buffer]);
+}
+
+// Build one complete orbit for every propagated catalog entry once. These
+// paths remain visible and clickable while the live satellite dots update.
+function computeOrbitPaths() {
+  const now = Date.now();
+  const samples = orbitCatalog.length > 8000 ? 28 : 40;
+  const paths = [];
+  for (const entry of orbitCatalog) {
+    const satrec = satrecs[entry.norad_id];
+    if (!satrec || !(satrec.no > 0)) continue;
+    const periodMinutes = 2 * Math.PI / satrec.no;
+    const points = [];
+    const segments = [];
+    let previousLongitude = null;
+    for (let i = 0; i <= samples; i++) {
+      const date = new Date(now + periodMinutes * 60000 * i / samples);
+      const result = satellite.propagate(satrec, date);
+      if (!result?.position) continue;
+      const geo = satellite.eciToGeodetic(result.position, satellite.gstime(date));
+      if (!geo) continue;
+      const longitude = satellite.degreesLong(geo.longitude);
+      if (previousLongitude !== null && Math.abs(longitude - previousLongitude) > 180) {
+        if (points.length > 1) segments.push(points.splice(0));
+        else points.length = 0;
+      }
+      points.push({
+        lat: geo.latitude * 180 / Math.PI,
+        lng: longitude,
+        alt: Math.max(0.003, (geo.height || 0) / EARTH_RADIUS_KM),
+      });
+      previousLongitude = longitude;
+    }
+    if (points.length > 1) segments.push(points);
+    const color = orbitColor(entry.category);
+    for (const segment of segments) {
+      paths.push({ norad_id: entry.norad_id, name: entry.name, color, points: segment });
+    }
+  }
+  self.postMessage({ type: 'ORBITS', paths });
+}
+
+function orbitColor(category) {
+  const colors = {
+    crewed: '#168359', rocket_body: '#a77429', debris: '#a54145',
+    constellation: '#167b9c', gnss: '#7440a8', weather: '#9c7f20',
+    payload: '#8795a8', unknown: '#68788b',
+  };
+  return colors[category] || colors.unknown;
 }
 
 /**

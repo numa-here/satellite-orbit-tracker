@@ -292,12 +292,38 @@ function renderGraphsPanel() {
       data: { labels: [], datasets: [{ label: m.label, data: [], borderColor: m.color, backgroundColor: m.color + '20', borderWidth: 1.5, pointRadius: 0, fill: false, tension: 0.3 }] },
       options: { responsive: true, maintainAspectRatio: false, animation: { duration: 0 },
         plugins: { legend: { display: false } },
-        scales: { x: { display: false }, y: { display: true, ticks: { color: '#8892a0', font: { size: 9 } }, grid: { color: '#1e2a3a40' } } },
+        scales: {
+          x: { display: true, ticks: { color: '#8892a0', maxTicksLimit: 5, font: { size: 9 } }, grid: { color: '#1e2a3a40' } },
+          y: { display: true, ticks: { color: '#8892a0', font: { size: 9 } }, grid: { color: '#1e2a3a40' } },
+        },
       }});
   }
 }
 
 window.renderGraphsPanel = renderGraphsPanel;
+
+function setGraphSeries(series) {
+  const chartValues = {
+    'graph-altitude': series.altitude,
+    'graph-speed': series.speed,
+    'graph-lat': series.latitude,
+    'graph-lon': series.longitude,
+  };
+  for (const [id, values] of Object.entries(chartValues)) {
+    const chart = window.graphCharts?.[id];
+    if (!chart) continue;
+    if (chart.data?.datasets) {
+      chart.data.labels = [...series.labels];
+      chart.data.datasets[0].data = [...values];
+      chart.update('none');
+    } else {
+      chart.labels = [...series.labels];
+      chart.values = [...values];
+      drawFallbackChart(chart);
+    }
+  }
+}
+window.setGraphSeries = setGraphSeries;
 
 /**
  * Add a point to a graph chart.
@@ -419,24 +445,39 @@ async function renderSelectedSatelliteImage(entry) {
   if (imageLookupNorad === entry.norad_id) return;
   imageLookupNorad = entry.norad_id;
   figure.hidden = false;
+  image.onerror = null;
   image.removeAttribute('src');
   caption.textContent = 'Looking for a public satellite image…';
   try {
-    const search = `${entry.name || 'satellite'} satellite spacecraft`;
-    const url = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(search)}&gsrnamespace=6&gsrlimit=5&prop=imageinfo&iiprop=url&iiurlwidth=960&format=json&origin=*`;
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`Image lookup returned ${response.status}`);
-    const data = await response.json();
-    const page = Object.values(data.query?.pages || {})[0];
+    const searches = [`${entry.name || 'satellite'} satellite spacecraft`, entry.name || 'satellite'];
+    let page = null;
+    for (const search of searches) {
+      const url = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(search)}&gsrnamespace=6&gsrlimit=8&prop=imageinfo&iiprop=url&iiurlwidth=960&format=json&origin=*`;
+      const response = await fetch(url);
+      if (!response.ok) continue;
+      const data = await response.json();
+      page = Object.values(data.query?.pages || {}).find(candidate => candidate.imageinfo?.[0]?.thumburl || candidate.imageinfo?.[0]?.url);
+      if (page) break;
+    }
     const source = page?.imageinfo?.[0]?.thumburl || page?.imageinfo?.[0]?.url;
     if (!source) throw new Error('No public image found');
     image.alt = `${entry.name || 'Satellite'} (image: ${page.title || 'Wikimedia Commons'})`;
     image.src = source;
     caption.textContent = `${(page.title || 'Satellite image').replace(/^File:/, '')} · Wikimedia Commons`;
-    image.onerror = () => { image.removeAttribute('src'); caption.textContent = 'No public image is available for this object.'; };
+    image.onerror = showSatelliteImagePlaceholder;
   } catch (_) {
-    caption.textContent = 'No public image is available for this object.';
+    showSatelliteImagePlaceholder();
   }
+}
+
+function showSatelliteImagePlaceholder() {
+  const image = document.getElementById('info-image');
+  const caption = document.getElementById('info-image-caption');
+  if (!image || !caption) return;
+  image.onerror = null;
+  image.src = '/vendor/satellite-placeholder.svg';
+  image.alt = 'Illustrative satellite placeholder; no verified public photo found';
+  caption.textContent = 'Illustrative placeholder · no verified public photo found';
 }
 
 function renderElementRecord(entry) {

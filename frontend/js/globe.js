@@ -5,6 +5,8 @@ let catalogEntries = [];
 let propagationEntries = [];
 let visibleEntries = [];
 let propagatedPoints = [];
+let catalogOrbitPaths = [];
+let selectedOrbitPaths = [];
 let activeFilters = {};
 let activeSearch = '';
 let selectedNorad = null;
@@ -49,16 +51,18 @@ export function initGlobe(containerId) {
       .pointResolution(8)
       .pointsMerge(false)
       .pathsData([])
-      .pathPoints(d => d)
+      .pathPoints(d => d.points)
       .pathPointLat(d => d.lat)
       .pathPointLng(d => d.lng)
       .pathPointAlt(d => d.alt)
-      .pathColor(() => '#00d4ff')
-      .pathStroke(0.65)
-      .pathDashLength(0.015)
-      .pathDashGap(0.006)
-      .pathDashAnimateTime(12000)
+      .pathColor(path => path.selected ? '#8aff4d' : path.color)
+      .pathLabel(path => `${path.name} · NORAD ${path.norad_id} · moving in the direction of the animated dashes`)
+      .pathStroke(path => path.selected ? 0.9 : 0.36)
+      .pathDashLength(0.012)
+      .pathDashGap(0.008)
+      .pathDashAnimateTime(9000)
       .onPointClick(point => selectSatellite(point.norad_id))
+      .onPathClick(path => selectSatellite(path.norad_id))
       (container);
 
     // globe.gl may clear its canvas with an opaque color even when the
@@ -103,7 +107,7 @@ export function initGlobe(containerId) {
     controls.autoRotate = true;
     controls.autoRotateSpeed = 0.3;
     controls.minDistance = 1.02;
-    controls.maxDistance = 6.6;
+    controls.maxDistance = 12;
     const initialView = { lat: 20, lng: 0, altitude: 1.45 };
     globe.pointOfView(initialView, 0);
     cameraHistory = [initialView];
@@ -116,9 +120,14 @@ export function initGlobe(containerId) {
   }
 
   try {
-    worker = new Worker('/js/workers/satellite-worker.js');
+    worker = new Worker('/js/workers/satellite-worker.js?v=orbit-lines-20261023-1');
     worker.onmessage = event => {
       if (event.data.type === 'POSITIONS') renderPositions(event.data);
+      if (event.data.type === 'ORBITS') {
+        catalogOrbitPaths = event.data.paths || [];
+        applyOrbitVisibility();
+        showGlobeStatus(`Showing ${catalogOrbitPaths.length.toLocaleString()} satellite orbit paths · click an orbit to track it`);
+      }
     };
     worker.onerror = error => {
       console.error('Satellite propagation worker failed:', error);
@@ -143,7 +152,11 @@ export function setCatalog(entries) {
   startComputeTimer(propagationEntries.length > 1200 ? 1000 : 250);
   if (worker && catalogEntries.length) {
     worker.postMessage({ type: 'INIT', catalog: propagationEntries.map(entry => ({
-      norad_id: entry.norad_id, line1: entry.line1 || null,
+      norad_id: entry.norad_id, name: entry.name, line1: entry.line1 || null,
+      line2: entry.line2 || null, omm: entry.omm || null,
+      category: entry.category || 'unknown',
+    })), orbitCatalog: catalogEntries.map(entry => ({
+      norad_id: entry.norad_id, name: entry.name, line1: entry.line1 || null,
       line2: entry.line2 || null, omm: entry.omm || null,
       category: entry.category || 'unknown',
     })) });
@@ -221,8 +234,21 @@ function applyPointVisibility() {
   if (globe) globe.pointsData(points);
 }
 
+function applyOrbitVisibility() {
+  if (!globe) return;
+  const visibleIds = new Set(visibleEntries.map(entry => Number(entry.norad_id)));
+  const paths = catalogOrbitPaths.filter(path => visibleIds.has(Number(path.norad_id))).map(path => ({
+    ...path,
+    selected: Number(path.norad_id) === Number(selectedNorad),
+  }));
+  paths.push(...selectedOrbitPaths);
+  globe.pathsData(paths);
+}
+
 export function selectSatellite(noradId) {
   selectedNorad = noradId;
+  selectedOrbitPaths = [];
+  applyOrbitVisibility();
   const entry = catalogEntries.find(item => Number(item.norad_id) === Number(noradId));
   if (!entry) return;
   window.globeApp?.fetchAndDrawTrack?.(noradId);
@@ -262,7 +288,7 @@ export function setSimulationTime(time) {
   if (worker) worker.postMessage({ type: 'COMPUTE', time: simulationTime });
 }
 
-export function drawOrbitPath(points) {
+export function drawOrbitPath(points, noradId = selectedNorad) {
   if (!globe) return;
   const segments = [];
   let segment = [];
@@ -275,7 +301,15 @@ export function drawOrbitPath(points) {
     }
   });
   if (segment.length > 1) segments.push(segment);
-  globe.pathsData(segments);
+  const entry = catalogEntries.find(item => Number(item.norad_id) === Number(noradId));
+  selectedOrbitPaths = entry ? segments.map(segmentPoints => ({
+    norad_id: entry.norad_id,
+    name: entry.name,
+    color: '#8aff4d',
+    selected: true,
+    points: segmentPoints,
+  })) : [];
+  applyOrbitVisibility();
 }
 export function followSatellite(lat, lon) {
   if (globe) globe.pointOfView({ lat, lng: lon, altitude: 1.8 }, 1000);
