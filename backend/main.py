@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .config import DEFAULT_SATELLITES, SATELLITE_GROUPS
+from .config import DEFAULT_SATELLITES, SATELLITE_GROUPS, KEEPTRACK_API_KEY
 from starlette.middleware.gzip import GZipMiddleware
 from .propagation import build_satellite, get_elements, get_position, get_track
 from .catalog_service import CatalogError, get_catalog
@@ -62,21 +62,10 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
     summary="Health check",
     tags=["Diagnostics"],
 )
-async def health_check(
-    request: Request,
-):
+async def health_check():
     """Verify backend health and return catalog status."""
-    # Get catalog status for health check
-    try:
-        catalog = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: None  # Placeholder - actual catalog check below
-        )
-    except Exception:
-        pass
-
     # Check if KeepTrack key is configured
-    key_configured = bool(config_KEEPTRACK_API_KEY)
+    key_configured = bool(KEEPTRACK_API_KEY)
 
     # Try to get catalog info for count and source
     try:
@@ -300,26 +289,28 @@ if (FRONTEND_DIR / "js").is_dir():
 async def catalog_api(
     limit: int = Query(default=None, ge=1, le=100000, description="Maximum number of objects to return"),
     offset: int = Query(default=0, ge=0, description="Number of objects to skip"),
+    refresh: bool = Query(False, description="Refresh the catalog from upstream sources"),
 ):
     """Get satellite catalog with pagination support.
 
     Returns compact satellite data suitable for Three.js satellite.js propagation.
     Uses the 5-tier fallback chain: KeepTrack → CelesTrak → cache → seed data.
     """
-    from .config import CATALOG_MAX_OBJECTS
-    # Respect the configured max, but allow override via query param
-    effective_limit = limit if limit is not None else CATALOG_MAX_OBJECTS
-    effective_limit = min(effective_limit, 100000)  # hard cap
-
-    catalog = build_catalog(limit=effective_limit, offset=offset)
+    # Use the catalog service's cache and upstream/seed fallback chain. Calling
+    # build_catalog directly bypassed that logic and referenced an unimported
+    # function, leaving the browser with an empty catalog.
+    catalog = get_catalog(force_refresh=refresh)
+    objects = catalog.get("objects", [])
+    effective_limit = min(limit if limit is not None else len(objects), 100000)
+    page = objects[offset:offset + effective_limit]
     return JSONResponse(
         content={
-            "objects": catalog["objects"],
-            "count": catalog["count"],
-            "total_count": catalog["total_count"],
-            "sources": catalog["sources"],
-            "limit": catalog["limit"],
-            "offset": catalog["offset"],
+            "objects": page,
+            "count": len(page),
+            "total_count": catalog.get("total_count", len(objects)),
+            "sources": catalog.get("sources", [catalog.get("source", "unknown")]),
+            "limit": effective_limit,
+            "offset": offset,
         },
         media_type="application/json",
     )

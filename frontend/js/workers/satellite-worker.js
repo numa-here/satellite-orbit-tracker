@@ -73,6 +73,9 @@ function buildSatrec(entry) {
     if (entry.line1 && entry.line2) {
       return satellite.twoline2satrec(entry.line1, entry.line2);
     }
+    if (entry.omm && typeof satellite.json2satrec === 'function') {
+      return satellite.json2satrec(entry.omm);
+    }
     return null;
   } catch (err) {
     console.warn('Failed to build satrec for', entry.norad_id, err);

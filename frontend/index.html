@@ -1,15 +1,3 @@
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-  const tabBtns = document.querySelectorAll('.tab-btn');
-  tabBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const tabId = btn.dataset.tab;
-      switchInfoTab(tabId);
-    });
-  });
-  switchInfoTab('overview');
-});
-</script>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -57,7 +45,6 @@ document.addEventListener('DOMContentLoaded', function() {
         Showing <span id="count-shown">0</span> of <span id="count-total">0</span>
       </div>
       <div id="category-legend" class="category-legend"></div>
-</div>
     </div>
 
     <!-- Top-right floating panel triggers -->
@@ -86,82 +73,14 @@ document.addEventListener('DOMContentLoaded', function() {
       <div class="hud-row"><span class="hud-label">Longitude:</span> <span class="hud-value" id="hud-lon">0.00°</span></div>
     </div>
 
-    <!-- Floating glass panels (closed by default) -->
-    <div class="glass-panel" id="panel-info">
-      <button class="panel-close" id="close-panel-info">&times;</button>
-      <h3 class="panel-title">Info</h3>
-      <div id="panel-info-content"></div>
-    </div>
-    <div class="glass-panel" id="panel-speed">
-      <button class="panel-close" id="close-panel-speed">&times;</button>
-      <h3 class="panel-title">Speed / Time</h3>
-      <div id="panel-speed-content"></div>
-    </div>
-    <div class="glass-panel" id="panel-graphs">
-      <button class="panel-close" id="close-panel-graphs">&times;</button>
-      <h3 class="panel-title">Graphs</h3>
-      <div id="panel-graphs-content"></div>
-    </div>
+    <!-- Search and display filters -->
     <div class="glass-panel" id="panel-settings">
       <button class="panel-close" id="close-panel-settings">&times;</button>
-      <h3 class="panel-title">Settings</h3>
-    </div>
-    <div class="glass-panel" id="panel-speed">
-      <button class="panel-close" id="close-panel-speed">&times;</button>
-      <h3 class="panel-title">Speed Controls</h3>
-      <div class="speed-controls">
-        <button class="speed-btn" data-speed="1">x1</button>
-        <button class="speed-btn" data-speed="10">x10</button>
-        <button class="speed-btn" data-speed="100">x100</button>
-        <button class="speed-btn" data-speed="1000">x1000</button>
-        <button id="speed-pause" class="speed-btn">⏸️ Pause</button>
-        <button id="speed-now" class="speed-btn">Now</button>
-        <button id="speed-jump" class="speed-btn">Date…</button>
-        <input type="date" id="jump-date" class="speed-input" style="margin:0 8px; width:120px;">
-      </div>
-    </div>
-      <div class="filter-section">
-        <div id="category-filters" class="filter-chip-group"></div>
-        <div id="orbit-filters" class="filter-chip-group"></div>
-        <div id="type-filters" class="filter-chip-group"></div>
-        <div id="country-filters" class="filter-chip-group"></div>
-      </div>
-    </div>
-    <div class="glass-panel" id="panel-speed">
-      <button class="panel-close" id="close-panel-speed">&times;</button>
-      <h3 class="panel-title">Speed Controls</h3>
-      <div class="speed-controls">
-        <button class="speed-btn" data-speed="1">x1</button>
-        <button class="speed-btn" data-speed="10">x10</button>
-        <button class="speed-btn" data-speed="100">x100</button>
-        <button class="speed-btn" data-speed="1000">x1000</button>
-        <button id="speed-pause" class="speed-btn">⏸️ Pause</button>
-        <button id="speed-now" class="speed-btn">Now</button>
-        <button id="speed-jump" class="speed-btn">Date…</button>
-        <input type="date" id="jump-date" class="speed-input" style="margin:0 8px; width:120px;">
-      </div>
-    </div>
-      <div class="filter-section">
-        <div id="category-filters" class="filter-chip-group"></div>
-        <div id="orbit-filters" class="filter-chip-group"></div>
-        <div id="type-filters" class="filter-chip-group"></div>
-        <div id="country-filters" class="filter-chip-group"></div>
-      </div>
-        <h4>Category</h4>
-        <div class="filter-chips" id="category-filters"></div>
-      </div>
-      <div class="filter-section">
-        <h4>Orbit Regime</h4>
-        <div class="filter-chips" id="orbit-filters"></div>
-      </div>
-      <div class="filter-section">
-        <h4>Object Type</h4>
-        <div class="filter-chips" id="type-filters"></div>
-      </div>
-      <div class="filter-section">
-        <h4>Catalog</h4>
-        <div id="category-legend"></div>
-      </div>
+      <h3 class="panel-title">Display &amp; Filters</h3>
+      <div class="filter-section"><h4>Category</h4><div id="category-filters" class="filter-chip-group"></div></div>
+      <div class="filter-section"><h4>Orbit regime</h4><div id="orbit-filters" class="filter-chip-group"></div></div>
+      <div class="filter-section"><h4>Object type</h4><div id="type-filters" class="filter-chip-group"></div></div>
+      <div class="filter-section"><h4>Country</h4><div id="country-filters" class="filter-chip-group"></div></div>
     </div>
 
     <div class="glass-panel" id="panel-info">
