@@ -245,6 +245,7 @@ export function setSatellitesVisible(visible) {
 export function setEarthVisible(visible) {
   earthVisible = Boolean(visible);
   if (globe) globe.showGlobe(earthVisible);
+  document.getElementById('globe-container')?.classList.toggle('earth-hidden', !earthVisible);
 }
 
 export function setSimulationRate(rate) {

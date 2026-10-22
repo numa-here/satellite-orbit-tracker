@@ -9,11 +9,11 @@ import {
   initGlobe, setCatalog as globeSetCatalog, setFilters, setSearch,
   selectSatellite, hoverSatellite, updateSatMarker, drawOrbitPath,
   followSatellite, setFollowMode, getCatalog, getSelectedNorad,
-  setSimulationRate, setSimulationTime, setSatellitesVisible, setEarthVisible,
+  setSatellitesVisible, setEarthVisible,
   zoomIn, zoomOut, undoCamera, redoCamera,
-} from './globe.js?v=orbit-globe-20261022-7';
+} from './globe.js?v=orbit-globe-20261023-9';
 
-import { initCatalogUI, setCatalog as catalogSetCatalog } from './catalog-ui.js?v=orbit-globe-20261022-7';
+import { initCatalogUI, setCatalog as catalogSetCatalog } from './catalog-ui.js?v=orbit-globe-20261023-9';
 
 // --- State -----------------------------------------------------------------
 
@@ -56,12 +56,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   initGlobe('globe-container');
   // Wire the floating controls before any network requests. A slow catalog
   // must not leave the visible buttons inert while the page is loading.
-  if (typeof window.renderSpeedPanel === 'function') window.renderSpeedPanel();
   if (typeof window.renderGraphsPanel === 'function') window.renderGraphsPanel();
   setupEventListeners();
   setupPanelTheme();
-  updateSimulationClock();
-  window.setInterval(updateSimulationClock, 1000);
   initAltitudeChart();
   showLoading('Connecting to backend…');
 
@@ -214,32 +211,6 @@ function setupEventListeners() {
     });
   }
 
-  // Time controls
-  const timeControls = window.panelTimeControls;
-  if (timeControls) {
-    timeControls.btnNow.addEventListener('click', () => {
-      setSimulationTime(Date.now());
-      setSimulationRate(1);
-      timeControls.btnX1.classList.add('active');
-      [timeControls.btnX10, timeControls.btnX100, timeControls.btnX1000].forEach(button => button.classList.remove('active'));
-    });
-    [[timeControls.btnX1, 1], [timeControls.btnX10, 10],
-      [timeControls.btnX100, 100], [timeControls.btnX1000, 1000]].forEach(([button, rate]) => {
-      button.addEventListener('click', () => {
-        setSimulationRate(rate);
-        document.querySelectorAll('#panel-speed-content .btn-sm').forEach(item => item.classList.remove('active'));
-        button.classList.add('active');
-      });
-    });
-    timeControls.jumpInput.addEventListener('change', () => {
-      if (!timeControls.jumpInput.value) return;
-      setSimulationTime(new Date(timeControls.jumpInput.value).getTime());
-      setSimulationRate(1);
-      timeControls.btnX1.classList.add('active');
-      [timeControls.btnX10, timeControls.btnX100, timeControls.btnX1000].forEach(button => button.classList.remove('active'));
-    });
-  }
-
   // Center toolbar buttons
   const btnToggleSats = document.getElementById('btn-toggle-sats');
   if (btnToggleSats) {
@@ -279,7 +250,6 @@ function setupEventListeners() {
 function setupPanelTriggers() {
   const panels = {
     'btn-panel-info': 'panel-info',
-    'btn-panel-speed': 'panel-speed',
     'btn-panel-graphs': 'panel-graphs',
     'btn-panel-settings': 'panel-settings',
   };
@@ -302,6 +272,12 @@ function setupPanelTriggers() {
       });
     }
   }
+
+  document.getElementById('btn-panel-tle')?.addEventListener('click', () => {
+    document.querySelectorAll('.glass-panel').forEach(panel => panel.classList.remove('visible'));
+    document.getElementById('panel-info')?.classList.add('visible');
+    window.switchInfoTab?.('tle');
+  });
 
   document.querySelectorAll('.tab-btn').forEach(button => {
     button.addEventListener('click', () => window.switchInfoTab?.(button.dataset.tab));
@@ -419,11 +395,6 @@ function setupPanelTheme() {
   try { light = localStorage.getItem('orbit-tracker-panel-theme') === 'light'; } catch (_) {}
   apply(light);
   button.addEventListener('click', () => apply(!document.body.classList.contains('panels-light')));
-}
-
-function updateSimulationClock() {
-  const clock = document.getElementById('simulation-clock');
-  if (clock) clock.textContent = new Date(window.simulationTime || Date.now()).toUTCString().replace(' GMT', ' UTC');
 }
 
 // ==========================================================================

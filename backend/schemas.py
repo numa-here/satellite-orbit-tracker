@@ -113,6 +113,7 @@ class CatalogEntry(BaseModel):
     object_type: Optional[str] = Field(None, description="SATCAT object type: PAY, R/B, DEB, UNK, etc.")
     category: Optional[str] = Field(None, description="UI category: payload, rocket_body, debris, constellation, gnss, weather, crewed, unknown")
     country: Optional[str] = Field(None, description="Owner/country from SATCAT")
+    status: Optional[str] = Field(None, description="Operational status from SATCAT")
     launch_date: Optional[str] = Field(None, description="Launch date ISO-8601")
     launch_site: Optional[str] = Field(None, description="Launch site")
     intl_designator: Optional[str] = Field(None, description="International designator")

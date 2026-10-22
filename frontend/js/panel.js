@@ -231,61 +231,6 @@ function renderInfoPanel(entry, pos, elems) {
 window.renderInfoPanel = renderInfoPanel;
 
 /**
- * Populate the Speed / Time glass panel with time controls.
- */
-function renderSpeedPanel() {
-  const container = document.getElementById('panel-speed-content');
-  if (!container) return;
-  container.innerHTML = '';
-
-  container.appendChild(section('Simulation Time'));
-
-  const row = document.createElement('div');
-  row.style.display = 'flex';
-  row.style.gap = '6px';
-  row.style.flexWrap = 'wrap';
-
-  const btnNow = document.createElement('button');
-  btnNow.type = 'button'; btnNow.className = 'btn-sm';
-  btnNow.id = 'panel-btn-time-now'; btnNow.textContent = 'Now';
-
-  const btnX1 = document.createElement('button');
-  btnX1.type = 'button'; btnX1.className = 'btn-sm active';
-  btnX1.id = 'panel-btn-speed-1'; btnX1.textContent = '×1';
-
-  const btnX10 = document.createElement('button');
-  btnX10.type = 'button'; btnX10.className = 'btn-sm';
-  btnX10.id = 'panel-btn-speed-10'; btnX10.textContent = '×10';
-
-  const btnX100 = document.createElement('button');
-  btnX100.type = 'button'; btnX100.className = 'btn-sm';
-  btnX100.id = 'panel-btn-speed-100'; btnX100.textContent = '×100';
-
-  const btnX1000 = document.createElement('button');
-  btnX1000.type = 'button'; btnX1000.className = 'btn-sm';
-  btnX1000.id = 'panel-btn-speed-1000'; btnX1000.textContent = '×1000';
-
-  row.appendChild(btnNow);
-  row.appendChild(btnX1);
-  row.appendChild(btnX10);
-  row.appendChild(btnX100);
-  row.appendChild(btnX1000);
-  container.appendChild(row);
-
-  const dateRow = document.createElement('div');
-  dateRow.style.marginTop = '10px';
-  dateRow.innerHTML = '<label style="display:block;font-size:0.7rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;">Jump to date</label><input type="datetime-local" id="panel-jump-datetime" style="width:100%;background:#1a1e2e;border:1px solid var(--panel-border);border-radius:6px;color:var(--text);padding:6px 10px;font-size:0.8rem;">';
-  container.appendChild(dateRow);
-
-  window.panelTimeControls = {
-    btnNow, btnX1, btnX10, btnX100, btnX1000,
-    jumpInput: document.getElementById('panel-jump-datetime'),
-  };
-}
-
-window.renderSpeedPanel = renderSpeedPanel;
-
-/**
  * Populate the Graphs glass panel with empty Chart.js canvases.
  */
 function renderGraphsPanel() {
@@ -431,14 +376,15 @@ function updateInfoPanel(entry, pos, elems) {
     const title = document.getElementById('info-panel-title');
     if (title) title.textContent = `${entry.name || 'Satellite'} · NORAD ${entry.norad_id}`;
     document.getElementById('info-norad').textContent = entry.norad_id || '—';
-    document.getElementById('info-desig').textContent = entry.intl_designator || '—';
-    document.getElementById('info-country').textContent = entry.country || '—';
-    document.getElementById('info-type').textContent = (entry.object_type || 'UNK').replace(/_/g, ' ') || '—';
-    document.getElementById('info-launch-date').textContent = entry.launch_date || '—';
-    document.getElementById('info-launch-site').textContent = entry.launch_site || '—';
-    const status = entry.stale ? 'STALE' : 'LIVE';
+    const unavailable = 'Not listed in catalog';
+    document.getElementById('info-desig').textContent = entry.intl_designator || unavailable;
+    document.getElementById('info-country').textContent = entry.country || unavailable;
+    document.getElementById('info-type').textContent = entry.object_type ? entry.object_type.replace(/_/g, ' ') : unavailable;
+    document.getElementById('info-launch-date').textContent = entry.launch_date || unavailable;
+    document.getElementById('info-launch-site').textContent = entry.launch_site || unavailable;
+    const status = entry.status || (entry.stale ? 'Catalog data is cached' : unavailable);
     document.getElementById('info-status').textContent = status;
-    document.getElementById('info-status').className = 'info-value ' + (entry.stale ? 'stale' : 'live');
+    document.getElementById('info-status').className = 'info-value ' + (entry.status === 'Operational' ? 'live' : entry.stale ? 'stale' : '');
     renderSelectedSatelliteImage(entry);
     renderElementRecord(entry);
   }
@@ -505,7 +451,8 @@ function renderElementRecord(entry) {
   const omm = entry.omm;
   if (omm && typeof omm === 'object') {
     const keys = ['OBJECT_NAME', 'OBJECT_ID', 'EPOCH', 'MEAN_MOTION', 'ECCENTRICITY', 'INCLINATION', 'RA_OF_ASC_NODE', 'ARG_OF_PERICENTER', 'MEAN_ANOMALY', 'BSTAR', 'MEAN_MOTION_DOT', 'MEAN_MOTION_DDOT'];
-    output.textContent = keys.filter(key => omm[key] != null).map(key => `${key}: ${omm[key]}`).join('\n');
+    const values = keys.filter(key => omm[key] != null).map(key => `${key}: ${omm[key]}`);
+    output.textContent = values.length ? values.join('\n') : 'No TLE / OMM fields were published for this catalog entry.';
     if (description) description.textContent = 'This source provides CCSDS OMM orbital elements instead of legacy TLE lines. Values below are shown as published; no TLE values are fabricated.';
     return;
   }

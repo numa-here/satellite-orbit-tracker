@@ -59,7 +59,7 @@ SATCAT_CACHE_TTL_SECONDS = int(os.getenv("SATCAT_CACHE_TTL_SECONDS", "86400"))
 CATALOG_MAX_OBJECTS = int(os.getenv("CATALOG_MAX_OBJECTS", "20000"))
 SATCAT_URL = os.getenv(
     "SATCAT_URL",
-    "https://celestrak.org/satcat/records.php?FORMAT=JSON&MAX=150000",
+    "https://celestrak.org/satcat/records.php?GROUP=active&FORMAT=JSON",
 )
 
 CELESTRAK_GP_GROUPS = [

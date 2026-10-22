@@ -37,6 +37,22 @@ REQUEST_HEADERS = {
 EARTH_RADIUS_KM = 6378.135
 MU_KM3_S2 = 398600.8
 MINUTES_PER_DAY = 1440.0
+OWNER_NAMES = {
+    "US": "United States", "CIS": "Commonwealth of Independent States", "PRC": "China",
+    "CHBZ": "China / Brazil", "ESA": "European Space Agency", "ESRO": "European Space Research Organisation",
+    "FR": "France", "GER": "Germany", "UK": "United Kingdom", "JPN": "Japan", "IND": "India",
+    "ISRO": "Indian Space Research Organisation", "CA": "Canada", "IT": "Italy", "SPN": "Spain",
+    "NETH": "Netherlands", "SKOR": "South Korea", "NKOR": "North Korea", "IRAN": "Iran",
+    "ISRA": "Israel", "AUS": "Australia", "BRAZ": "Brazil", "ARGN": "Argentina", "MEX": "Mexico",
+    "PAKI": "Pakistan", "TURK": "Türkiye", "UAE": "United Arab Emirates", "SAUD": "Saudi Arabia",
+    "NATO": "NATO", "ISS": "International Space Station partners", "GLOB": "Globalstar", "IRID": "Iridium",
+    "SES": "SES", "EUTE": "Eutelsat", "IM": "Inmarsat", "UNK": "Unknown",
+}
+OPS_STATUS_NAMES = {
+    "+": "Operational", "-": "Nonoperational", "P": "Partially operational",
+    "B": "Backup / standby", "S": "Spare", "X": "Extended mission",
+    "D": "Decayed / deorbited", "?": "Unknown",
+}
 
 
 def _is_fresh_ttl(payload: Dict[str, Any], ttl_seconds: float) -> bool:
@@ -145,6 +161,7 @@ def _normalize_omm(sat_data: Dict[str, Any], group: str) -> Optional[CatalogEntr
         name=_first_str(sat_data, ["OBJECT_NAME", "name"]) or _first_str(omm, ["OBJECT_NAME"]) or "UNKNOWN",
         object_type=_first_str(sat_data, ["OBJECT_TYPE", "object_type"]) or _first_str(omm, ["OBJECT_TYPE"]),
         country=_first_str(sat_data, ["OWNER", "country"]) or _first_str(omm, ["OWNER"]),
+        status=_first_str(sat_data, ["OPS_STATUS_CODE", "status"]) or _first_str(omm, ["OPS_STATUS_CODE"]),
         launch_date=_first_str(sat_data, ["LAUNCH_DATE", "launch_date"]) or _first_str(omm, ["LAUNCH_DATE"]),
         launch_site=_first_str(sat_data, ["LAUNCH_SITE", "launch_site"]) or _first_str(omm, ["LAUNCH_SITE"]),
         intl_designator=_first_str(sat_data, ["OBJECT_ID", "intl_designator"]) or _first_str(omm, ["OBJECT_ID"]),
@@ -196,6 +213,7 @@ def _normalize_keeptrack_item(item: Dict[str, Any]) -> Optional[CatalogEntry]:
         name=_first_str(item, ["name", "object_name", "satellite_name", "title"]) or omm.get("OBJECT_NAME") or "UNKNOWN",
         object_type=_first_str(item, ["object_type"]) or omm.get("OBJECT_TYPE"),
         country=_first_str(item, ["country", "owner"]) or omm.get("OWNER"),
+        status=_first_str(item, ["status", "ops_status_code"]) or omm.get("OPS_STATUS_CODE"),
         launch_date=_first_str(item, ["launch_date"]) or omm.get("LAUNCH_DATE"),
         launch_site=_first_str(item, ["launch_site"]) or omm.get("LAUNCH_SITE"),
         intl_designator=_first_str(item, ["intl_designator", "international_designator"]) or omm.get("OBJECT_ID"),
@@ -217,8 +235,10 @@ def _normalize_keeptrack_item(item: Dict[str, Any]) -> Optional[CatalogEntry]:
 def _merge_satcat(entry: CatalogEntry, meta: Optional[Dict[str, Any]]) -> None:
     if not meta:
         return
-    if not entry.country:
-        entry.country = _first_str(meta, ["OWNER", "owner"])
+    owner = entry.country or _first_str(meta, ["OWNER", "owner"])
+    entry.country = OWNER_NAMES.get(owner, owner) if owner else None
+    status = entry.status or _first_str(meta, ["OPS_STATUS_CODE", "ops_status_code", "status"])
+    entry.status = OPS_STATUS_NAMES.get(status, status) if status else None
     if not entry.launch_date:
         entry.launch_date = _first_str(meta, ["LAUNCH_DATE", "launch_date"])
     if not entry.launch_site:
@@ -244,10 +264,23 @@ def _merge_satcat(entry: CatalogEntry, meta: Optional[Dict[str, Any]]) -> None:
 
 
 def _fetch_satcat() -> Dict[int, Dict[str, Any]]:
-    """Return cached SATCAT enrichment without blocking on a bulk network fetch."""
+    """Load SATCAT enrichment from the runtime cache or bundled public snapshot."""
     cached = _read_cache("satcat_all_v1")
     data = (cached or {}).get("data", {})
-    return data if isinstance(data, dict) else {}
+    if isinstance(data, dict) and data:
+        return {_safe_int(key): value for key, value in data.items() if _safe_int(key) is not None}
+    try:
+        from pathlib import Path
+        snapshot_path = Path(__file__).parent / "data" / "satcat_metadata.json"
+        with snapshot_path.open(encoding="utf-8") as snapshot_file:
+            rows = json.load(snapshot_file)
+        if isinstance(rows, dict):
+            return {_safe_int(key): value for key, value in rows.items() if _safe_int(key) is not None and isinstance(value, dict)}
+        if isinstance(rows, list):
+            return {norad: row for row in rows if isinstance(row, dict) and (norad := _safe_int(row.get("NORAD_CAT_ID") or row.get("norad_id"))) is not None}
+    except (OSError, ValueError, TypeError) as exc:
+        logger.warning("Bundled SATCAT metadata unavailable: %s", exc)
+    return {}
 
 
 def _fetch_keeptrack_brief() -> List[Dict[str, Any]]:
@@ -295,6 +328,7 @@ def _entry_to_compact(entry: CatalogEntry) -> Dict[str, Any]:
         "object_type": entry.object_type,
         "category": entry.category,
         "country": entry.country,
+        "status": entry.status,
         "launch_date": entry.launch_date,
         "launch_site": entry.launch_site,
         "intl_designator": entry.intl_designator,
@@ -378,7 +412,7 @@ def build_catalog(limit: Optional[int] = None, offset: int = 0) -> Dict[str, Any
     # orbit scene remain useful during an outage. Fresh upstream items already
     # in ``items`` take precedence over snapshot rows with matching NORAD IDs.
     snapshot_used = False
-    if len(items) < 500 and not celestrak_present and not retlector_present:
+    if len(items) < 5000:
         try:
             from pathlib import Path
             snapshot_path = Path(__file__).parent / "data" / "active_omm_snapshot.json"
@@ -460,8 +494,8 @@ def build_catalog(limit: Optional[int] = None, offset: int = 0) -> Dict[str, Any
 
 
 def get_catalog(force_refresh: bool = False) -> Dict[str, Any]:
-    # v2 invalidates earlier small seed-only catalogs cached under v1.
-    cache_key = "catalog_v2"
+    # v3 invalidates partial catalogs cached before snapshot top-up was applied.
+    cache_key = "catalog_v3"
     cached = _read_cache(cache_key)
     cached_data = cached.get("data", {}) if isinstance(cached, dict) else {}
     if not isinstance(cached_data, dict):

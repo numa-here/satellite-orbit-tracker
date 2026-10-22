@@ -107,7 +107,12 @@ html, body {
 #globe-container .scene-container {
   position: relative;
   z-index: 1;
+  /* Black clears blend away so the bundled Earth remains visible even on
+     WebGL builds that ignore the renderer's transparent-clear setting. */
+  mix-blend-mode: screen;
 }
+
+#globe-container.earth-hidden::before { display: none; }
 
 /* --- Info panel (right side) -------------------------------------------- */
 #info-panel {
