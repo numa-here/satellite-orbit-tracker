@@ -129,6 +129,26 @@ def fetch_satellite_by_norad(norad_id: int) -> Dict[str, Any]:
 
     # Attempt network fetch across candidate endpoints (with 5s connect timeout)
     last_network_exc = None
+    # Render and similar hosts may be unable to reach CelesTrak directly.
+    # Try the public CelesTrak mirror first so a fresh catalog does not wait
+    # through several connection timeouts before receiving usable OMM data.
+    try:
+        mirror = requests.get(
+            f"https://retlector.eu/{clean_group}/json",
+            headers=REQUEST_HEADERS,
+            timeout=(3, 8),
+        )
+        mirror.raise_for_status()
+        parsed = mirror.json()
+        sat_list = parsed if isinstance(parsed, list) else [parsed]
+        sat_list = [item for item in sat_list if isinstance(item, dict)]
+        if sat_list:
+            _write_cache(cache_key, sat_list, provider="retlector")
+            return {"data": sat_list, "stale": False, "cached": False, "provider": "retlector"}
+    except Exception as exc:
+        last_network_exc = exc
+        logger.warning("ReTLEctor mirror failed for group '%s': %s", group, exc)
+
     for endpoint in CELESTRAK_ENDPOINTS:
         url = f"{endpoint}?CATNR={norad_id}&FORMAT=JSON"
         try:
@@ -218,25 +238,6 @@ def fetch_group(group: str) -> Dict[str, Any]:
         except Exception as exc:
             last_network_exc = exc
             logger.warning("CelesTrak endpoint '%s' failed for group '%s': %s", endpoint, group, exc)
-
-    # ReTLEctor mirrors CelesTrak's public GP groups and keeps a short-lived
-    # cache of its own. Use it when the app host cannot reach CelesTrak.
-    try:
-        mirror = requests.get(
-            f"https://retlector.eu/{clean_group}/json",
-            headers=REQUEST_HEADERS,
-            timeout=(3, 8),
-        )
-        mirror.raise_for_status()
-        parsed = mirror.json()
-        sat_list = parsed if isinstance(parsed, list) else [parsed]
-        sat_list = [item for item in sat_list if isinstance(item, dict)]
-        if sat_list:
-            _write_cache(cache_key, sat_list, provider="retlector")
-            return {"data": sat_list, "stale": False, "cached": False, "provider": "retlector"}
-    except Exception as exc:
-        last_network_exc = exc
-        logger.warning("ReTLEctor mirror failed for group '%s': %s", group, exc)
 
     if cached:
         return {

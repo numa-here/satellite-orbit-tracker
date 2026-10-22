@@ -340,8 +340,14 @@ def build_catalog(limit: Optional[int] = None, offset: int = 0) -> Dict[str, Any
     celestrak_ok = False
     celestrak_present = False
     retlector_present = False
-    with ThreadPoolExecutor(max_workers=min(8, max(1, len(CELESTRAK_GP_GROUPS)))) as pool:
-        futures = {pool.submit(fetch_group, group): group for group in CELESTRAK_GP_GROUPS}
+    # The active GP group already contains the broad catalog (thousands of
+    # trackable objects). Fetching many overlapping groups serially through
+    # unreachable upstreams made the first page load take minutes on Render.
+    # Start with active for a prompt, large catalog; additional groups can be
+    # added here when a provider is reachable without blocking the first view.
+    groups_to_fetch = ["active"]
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(groups_to_fetch)))) as pool:
+        futures = {pool.submit(fetch_group, group): group for group in groups_to_fetch}
         for future in as_completed(futures):
             group = futures[future]
             try:
