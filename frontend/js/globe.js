@@ -61,6 +61,11 @@ export function initGlobe(containerId) {
       .onPointClick(point => selectSatellite(point.norad_id))
       (container);
 
+    // Keep the Earth sphere visible if the texture request fails. Once the
+    // texture loads, globe.gl applies it over this fallback material color.
+    const globeMaterial = globe.globeMaterial();
+    if (globeMaterial?.color?.set) globeMaterial.color.set('#315b78');
+
     window.globe = globe;
     const resize = () => {
       const width = container.clientWidth || window.innerWidth;
