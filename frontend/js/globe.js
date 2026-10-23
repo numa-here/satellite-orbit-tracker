@@ -169,7 +169,7 @@ export function initGlobe(containerId) {
   }
 
   try {
-    worker = new Worker('/js/workers/satellite-worker.js?v=orbit-picker-20261024-2');
+    worker = new Worker('/js/workers/satellite-worker.js?v=orbit-picker-20261024-3');
     worker.onmessage = event => {
       if (event.data.type === 'INIT_PROGRESS') {
         showGlobeStatus(`Preparing satellite elements ${event.data.processed.toLocaleString()} / ${event.data.total.toLocaleString()}…`);

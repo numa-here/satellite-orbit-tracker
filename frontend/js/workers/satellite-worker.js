@@ -1,6 +1,6 @@
 /**
  * satellite-worker.js – Web Worker that computes satellite positions.
- * Propagates catalog positions in a worker and computes an orbit only on selection.
+ * Propagates catalog positions and refreshes the selected inertial orbit path.
  *
  * Messages:
  *   { type: 'INIT', catalog: CatalogEntry[] }
@@ -21,6 +21,7 @@ let initIndex = 0;
 let initGeneration = 0;
 let pendingTime = null;
 let pendingSelection = null;
+let selectedOrbitNoradId = null;
 const INIT_BATCH_SIZE = 250;
 
 self.addEventListener('message', (e) => {
@@ -32,15 +33,18 @@ self.addEventListener('message', (e) => {
     initIndex = 0;
     pendingTime = null;
     pendingSelection = null;
+    selectedOrbitNoradId = null;
     const generation = ++initGeneration;
     initializeCatalogBatch(generation);
   } else if (type === 'COMPUTE') {
     pendingTime = e.data.time;
     if (ready) {
       computePositions(pendingTime);
+      if (selectedOrbitNoradId != null) computeSelectedOrbit(selectedOrbitNoradId, pendingTime);
       pendingTime = null;
     }
   } else if (type === 'SELECT') {
+    selectedOrbitNoradId = e.data.norad_id;
     pendingSelection = { norad_id: e.data.norad_id, time: e.data.time };
     if (ready) {
       computeSelectedOrbit(pendingSelection.norad_id, pendingSelection.time);
@@ -105,6 +109,10 @@ function computeSelectedOrbit(noradId, timeMs) {
     return;
   }
   const periodMinutes = 2 * Math.PI / satrec.no;
+  // Keep Earth fixed at the selection time while sampling this orbit. Using
+  // each future sample's sidereal angle draws a rotating-frame ground track,
+  // which twists and fails to close for most non-geostationary satellites.
+  const fixedGmst = satellite.gstime(new Date(Number(timeMs)));
   const paths = [];
   let segment = [];
   let previousLongitude = null;
@@ -121,7 +129,7 @@ function computeSelectedOrbit(noradId, timeMs) {
       previousAltitude = null;
       continue;
     }
-    const geo = satellite.eciToGeodetic(result.position, satellite.gstime(date));
+    const geo = satellite.eciToGeodetic(result.position, fixedGmst);
     if (!geo || !Number.isFinite(geo.height) || !Number.isFinite(geo.latitude) || !Number.isFinite(geo.longitude)
       || geo.height < 0) {
       if (segment.length > 1) paths.push({ norad_id: entry.norad_id, name: entry.name, points: segment });
