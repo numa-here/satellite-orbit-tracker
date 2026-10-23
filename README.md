@@ -2,6 +2,10 @@
 
 A high-performance real-time satellite tracking web application. Select any satellite (defaults to the **International Space Station**, NORAD ID `25544`) to view a photorealistic, rotating 3D Earth globe, live sub-satellite coordinates, forward azimuth heading, full Keplerian orbital elements, and altitude-over-time charts.
 
+## 🌐 Live Demo
+
+Try the deployed app: [Satellite Orbit Tracker](https://satellite-orbit-tracker.onrender.com)
+
 ---
 
 ## ✨ Features
