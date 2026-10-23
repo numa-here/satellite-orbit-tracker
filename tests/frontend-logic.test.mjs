@@ -68,9 +68,10 @@ test('previous and next satellite navigation wraps through the current filtered 
   assert.equal(adjacentSatelliteEntry(entries, 25544, 0), null);
 });
 
-test('worker emits selected full orbit paths in the same satellite and altitude scale', () => {
+test('worker emits xyz buffers for positions and a full selected orbit', () => {
   const source = readFileSync(new URL('../frontend/js/workers/satellite-worker.js', import.meta.url), 'utf8');
   const messages = [];
+  const transferLists = [];
   let onMessage;
   const fakeSatellite = {
     twoline2satrec: () => ({ no: 0.067, error: 0 }),
@@ -89,61 +90,74 @@ test('worker emits selected full orbit paths in the same satellite and altitude 
     setTimeout: callback => callback(),
     self: {
       addEventListener: (_type, listener) => { onMessage = listener; },
-      postMessage: message => messages.push(message),
+      postMessage: (message, transfers = []) => { messages.push(message); transferLists.push(transfers); },
     },
   };
   vm.runInNewContext(source, context);
-  onMessage({ data: { type: 'INIT', catalog: [{ norad_id: 25544, name: 'ISS', line1: 'line1', line2: 'line2' }] } });
-  onMessage({ data: { type: 'SELECT', norad_id: 25544, time: Date.UTC(2026, 0, 1) } });
+  const time = Date.UTC(2026, 0, 1);
+  onMessage({ data: { type: 'INIT', catalog: [{ norad_id: 25544, name: 'ISS', line1: 'line1', line2: 'line2', category: 'crewed' }] } });
+  onMessage({ data: { type: 'COMPUTE', time } });
+  const positions = messages.find(message => message.type === 'POSITIONS');
+  assert.ok(ArrayBuffer.isView(positions.positions));
+  assert.equal(positions.positions.length, 3);
+  assert.equal(positions.valid[0], 1);
+  assert.ok(Math.abs(positions.sizes[0] - 2.7) < 0.0001);
+  const angle = (time / 1000 % 6000) / 6000 * Math.PI * 2 - Math.PI;
+  const latitude = Math.sin(angle) * 0.4 * 180 / Math.PI;
+  const longitude = ((angle * 180 / Math.PI + 540) % 360) - 180;
+  const phi = (90 - latitude) * Math.PI / 180;
+  const theta = (90 - longitude) * Math.PI / 180;
+  const radius = 100 * (1 + 400 / 6371);
+  const expected = [radius * Math.sin(phi) * Math.cos(theta), radius * Math.cos(phi), radius * Math.sin(phi) * Math.sin(theta)];
+  expected.forEach((value, axis) => assert.ok(Math.abs(positions.positions[axis] - value) < 0.001));
+  assert.equal(transferLists.at(-1)[0], positions.positions.buffer);
+  assert.equal(transferLists.at(-1)[1], positions.sizes.buffer);
+  assert.equal(transferLists.at(-1)[2], positions.valid.buffer);
+
+  onMessage({ data: { type: 'SELECT', norad_id: 25544, time } });
   const orbit = messages.find(message => message.type === 'ORBITS');
   assert.equal(orbit.norad_id, 25544);
-  const allPoints = orbit.paths.flatMap(path => path.points);
-  assert.equal(allPoints.length, 181);
-  assert.ok(orbit.paths.length >= 1);
-  assert.ok(allPoints.every(point => point.lat >= -90 && point.lat <= 90));
-  assert.ok(allPoints.every(point => point.alt === 400 / 6371));
+  assert.ok(ArrayBuffer.isView(orbit.positions));
+  assert.equal(orbit.positions.length, 241 * 3);
+  assert.equal(transferLists.at(-1)[0], orbit.positions.buffer);
+  for (let i = 0; i < orbit.positions.length; i += 3) {
+    assert.ok(Math.abs(Math.hypot(orbit.positions[i], orbit.positions[i + 1], orbit.positions[i + 2]) - radius) < 0.001);
+  }
 });
 
-test('bundled satellite.js propagates the cached ISS OMM into visible positions and an orbit', () => {
-  const source = readFileSync(new URL('../frontend/js/workers/satellite-worker.js', import.meta.url), 'utf8');
-  const fixture = JSON.parse(readFileSync(new URL('../backend/cache/norad_25544.json', import.meta.url), 'utf8')).data;
-  const messages = [];
-  const warnings = [];
+test('worker xyz conversion matches globe.gl getCoords for a known test point', () => {
+  const globeBundle = readFileSync(new URL('../frontend/vendor/globe.gl.min.js', import.meta.url), 'utf8');
+  const coordsSource = globeBundle.match(/function ax\(e,t\)\{.*?return\{x:.*?\}\}/s)?.[0];
+  assert.ok(coordsSource, 'globe.gl getCoords implementation is available in the bundled build');
+  const globeGetCoords = vm.runInNewContext(`(${coordsSource})`, { ix: 100 });
+  const expected = globeGetCoords(30, 60, 0);
+
+  const workerSource = readFileSync(new URL('../frontend/js/workers/satellite-worker.js', import.meta.url), 'utf8');
   let onMessage;
+  const messages = [];
   const context = {
-    satellite: satelliteJs,
-    Date,
+    satellite: {
+      twoline2satrec: () => ({ no: 0.067, error: 0 }),
+      propagate: () => ({ position: { x: 1 } }),
+      eciToGeodetic: () => ({ latitude: Math.PI / 6, longitude: Math.PI / 3, height: 0 }),
+      degreesLong: radians => radians * 180 / Math.PI,
+      gstime: () => 0,
+    },
     importScripts: () => {},
     setTimeout: callback => callback(),
-    console: { warn: (...args) => warnings.push(args.map(String).join(' ')) },
     self: {
       addEventListener: (_type, listener) => { onMessage = listener; },
       postMessage: message => messages.push(message),
     },
   };
-  vm.runInNewContext(source, context);
-  const time = Date.UTC(2026, 9, 23, 12);
-  onMessage({ data: { type: 'INIT', catalog: [{
-    norad_id: 25544, name: fixture.OBJECT_NAME, category: 'crewed', omm: fixture,
-  }] } });
-  assert.deepEqual(warnings, []);
-  assert.equal(messages.find(message => message.type === 'READY').count, 1);
-  onMessage({ data: { type: 'COMPUTE', time } });
-  const positions = messages.find(message => message.type === 'POSITIONS');
-  assert.equal(positions.valid[0], 1);
-  assert.ok(positions.positions[0] >= -90 && positions.positions[0] <= 90);
-  assert.ok(positions.positions[1] >= -180 && positions.positions[1] <= 180);
-  assert.ok(positions.positions[2] >= 350 && positions.positions[2] <= 450);
-
-  onMessage({ data: { type: 'SELECT', norad_id: 25544, time } });
-  const orbit = messages.find(message => message.type === 'ORBITS');
-  assert.equal(orbit.norad_id, 25544);
-  const allPoints = orbit.paths.flatMap(path => path.points);
-  assert.equal(allPoints.length, 181);
-  assert.ok(allPoints.every(point => Number.isFinite(point.lat) && Number.isFinite(point.lng)));
-  assert.ok(allPoints.every(point => point.alt > 0.05 && point.alt < 0.1));
+  vm.runInNewContext(workerSource, context);
+  onMessage({ data: { type: 'INIT', catalog: [{ norad_id: 1, line1: 'line1', line2: 'line2' }] } });
+  onMessage({ data: { type: 'COMPUTE', time: Date.UTC(2026, 0, 1) } });
+  const actual = messages.find(message => message.type === 'POSITIONS').positions;
+  assert.ok(Math.abs(actual[0] - expected.x) < 0.0001);
+  assert.ok(Math.abs(actual[1] - expected.y) < 0.0001);
+  assert.ok(Math.abs(actual[2] - expected.z) < 0.0001);
 });
-
 test('worker propagates a 1000-object bundled catalog sample off the UI thread', () => {
   const source = readFileSync(new URL('../frontend/js/workers/satellite-worker.js', import.meta.url), 'utf8');
   const rows = JSON.parse(readFileSync(new URL('../backend/data/active_omm_snapshot.json', import.meta.url), 'utf8'))

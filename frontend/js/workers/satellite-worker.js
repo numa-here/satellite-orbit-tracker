@@ -1,19 +1,12 @@
 /**
- * satellite-worker.js – Web Worker that computes satellite positions.
- * Propagates catalog positions in a worker and computes an orbit only on selection.
- *
- * Messages:
- *   { type: 'INIT', catalog: CatalogEntry[] }
- *   { type: 'COMPUTE', time: number }
- *   { type: 'SELECT', norad_id: number, time: number }
- *
- * Reply:
- *   { type: 'POSITIONS', positions: [latitude, longitude, altitudeKm...], sizes, valid }
+ * Propagate catalog positions and selected satellite orbits off the UI thread.
+ * Position and orbit coordinates are already in globe.gl's 100-unit world space.
  */
-
 importScripts('/vendor/satellite.min.js');
 
-const EARTH_RADIUS_KM = 6371.0;
+const EARTH_RADIUS_KM = 6371;
+const GLOBE_RADIUS = 100;
+const ORBIT_SAMPLES = 240;
 let catalog = [];
 let satrecs = {};
 let ready = false;
@@ -23,25 +16,24 @@ let pendingTime = null;
 let pendingSelection = null;
 const INIT_BATCH_SIZE = 250;
 
-self.addEventListener('message', (e) => {
-  const { type } = e.data;
+self.addEventListener('message', event => {
+  const { type } = event.data;
   if (type === 'INIT') {
-    catalog = e.data.catalog || [];
+    catalog = event.data.catalog || [];
     satrecs = {};
     ready = false;
     initIndex = 0;
     pendingTime = null;
     pendingSelection = null;
-    const generation = ++initGeneration;
-    initializeCatalogBatch(generation);
+    initializeCatalogBatch(++initGeneration);
   } else if (type === 'COMPUTE') {
-    pendingTime = e.data.time;
+    pendingTime = event.data.time;
     if (ready) {
       computePositions(pendingTime);
       pendingTime = null;
     }
   } else if (type === 'SELECT') {
-    pendingSelection = { norad_id: e.data.norad_id, time: e.data.time };
+    pendingSelection = { norad_id: event.data.norad_id, time: event.data.time };
     if (ready) {
       computeSelectedOrbit(pendingSelection.norad_id, pendingSelection.time);
       pendingSelection = null;
@@ -74,69 +66,73 @@ function initializeCatalogBatch(generation) {
   }
 }
 
-function computePositions(timeMs) {
-  const date = new Date(timeMs);
-  const n = catalog.length;
-  const positions = new Float32Array(n * 3);
-  const sizes = new Float32Array(n);
-  const valid = new Uint8Array(n);
-
-  for (let i = 0; i < n; i++) {
-    const entry = catalog[i];
-    const satrec = satrecs[entry.norad_id];
-    if (!satrec) { valid[i] = 0; continue; }
-    const result = propagatePosition(satrec, date, entry);
-    if (!result) { valid[i] = 0; continue; }
-    positions[i * 3] = result.latitude;
-    positions[i * 3 + 1] = result.longitude;
-    positions[i * 3 + 2] = result.altitudeKm;
-    sizes[i] = result.size;
-    valid[i] = 1;
-  }
-
-  self.postMessage({
-    type: 'POSITIONS', positions, sizes, valid,
-  }, [positions.buffer, sizes.buffer, valid.buffer]);
+function geodeticToXyz(latitude, longitude, altitudeKm) {
+  if (![latitude, longitude, altitudeKm].every(Number.isFinite)) return null;
+  const phi = (90 - latitude) * Math.PI / 180;
+  const theta = (90 - longitude) * Math.PI / 180;
+  const radius = GLOBE_RADIUS * (1 + altitudeKm / EARTH_RADIUS_KM);
+  return [
+    radius * Math.sin(phi) * Math.cos(theta),
+    radius * Math.cos(phi),
+    radius * Math.sin(phi) * Math.sin(theta),
+  ];
 }
 
-// A selected orbit uses 180 propagation samples across one full period.
+function computePositions(timeMs) {
+  const date = new Date(timeMs);
+  const positions = new Float32Array(catalog.length * 3);
+  const sizes = new Float32Array(catalog.length);
+  const valid = new Uint8Array(catalog.length);
+  for (let i = 0; i < catalog.length; i++) {
+    const entry = catalog[i];
+    const satrec = satrecs[entry.norad_id];
+    if (!satrec) continue;
+    const geo = propagatePosition(satrec, date);
+    if (!geo) continue;
+    const xyz = geodeticToXyz(geo.latitude, geo.longitude, geo.altitudeKm);
+    if (!xyz) continue;
+    positions.set(xyz, i * 3);
+    sizes[i] = pointSize(entry.category || 'unknown');
+    valid[i] = 1;
+  }
+  self.postMessage({ type: 'POSITIONS', positions, sizes, valid },
+    [positions.buffer, sizes.buffer, valid.buffer]);
+}
+
 function computeSelectedOrbit(noradId, timeMs) {
   const satrec = satrecs[noradId];
   const entry = catalog.find(item => Number(item.norad_id) === Number(noradId));
   if (!satrec || !entry || !(satrec.no > 0)) {
-    self.postMessage({ type: 'ORBITS', norad_id: noradId, paths: [] });
+    self.postMessage({ type: 'ORBITS', norad_id: noradId, positions: new Float32Array(0) });
     return;
   }
-  const periodMinutes = 2 * Math.PI / satrec.no;
-  const paths = [];
-  let segment = [];
-  let previousLongitude = null;
-  for (let i = 0; i <= 180; i++) {
-    const date = new Date(Number(timeMs) + periodMinutes * 60000 * i / 180);
-    const result = satellite.propagate(satrec, date);
-    if (!result?.position) continue;
-    const geo = satellite.eciToGeodetic(result.position, satellite.gstime(date));
-    if (!geo || !Number.isFinite(geo.height)) continue;
-    const longitude = satellite.degreesLong(geo.longitude);
-    if (previousLongitude !== null && Math.abs(longitude - previousLongitude) > 180) {
-      if (segment.length > 1) paths.push({ norad_id: entry.norad_id, name: entry.name, points: segment });
-      segment = [];
+  const periodMs = (2 * Math.PI / satrec.no) * 60000;
+  const positions = new Float32Array((ORBIT_SAMPLES + 1) * 3);
+  let count = 0;
+  for (let i = 0; i <= ORBIT_SAMPLES; i++) {
+    const date = new Date(Number(timeMs) + periodMs * i / ORBIT_SAMPLES);
+    try {
+      const result = satellite.propagate(satrec, date);
+      if (!result?.position) continue;
+      const geo = satellite.eciToGeodetic(result.position, satellite.gstime(date));
+      if (!geo || !Number.isFinite(geo.height)) continue;
+      const xyz = geodeticToXyz(
+        geo.latitude * 180 / Math.PI,
+        satellite.degreesLong(geo.longitude),
+        geo.height,
+      );
+      if (!xyz) continue;
+      positions.set(xyz, count * 3);
+      count++;
+    } catch (_) {
+      // A failed sample does not prevent the remaining orbit points from rendering.
     }
-    segment.push({
-      lat: geo.latitude * 180 / Math.PI,
-      lng: longitude,
-      alt: Math.max(0, geo.height / EARTH_RADIUS_KM),
-    });
-    previousLongitude = longitude;
   }
-  if (segment.length > 1) paths.push({ norad_id: entry.norad_id, name: entry.name, points: segment });
-  self.postMessage({ type: 'ORBITS', norad_id: entry.norad_id, paths });
+  const orbitPositions = positions.slice(0, count * 3);
+  self.postMessage({ type: 'ORBITS', norad_id: entry.norad_id, positions: orbitPositions },
+    [orbitPositions.buffer]);
 }
 
-/**
- * Build a satellite.js satrec from a catalog entry.
- * Prefers TLE lines; returns null if neither TLE nor usable OMM exists.
- */
 function buildSatrec(entry) {
   try {
     if (entry.line1 && entry.line2) {
@@ -148,43 +144,33 @@ function buildSatrec(entry) {
       return satrec?.error === 0 ? satrec : null;
     }
     return null;
-  } catch (err) {
-    console.warn('Failed to build satrec for', entry.norad_id, err);
+  } catch (error) {
+    console.warn('Failed to build satrec for', entry.norad_id, error);
     return null;
   }
 }
 
-/**
- * Propagate a satrec to geodetic latitude, longitude and altitude (km).
- */
-function propagatePosition(satrec, date, entry) {
+function propagatePosition(satrec, date) {
   try {
     const result = satellite.propagate(satrec, date);
-    if (!result || !result.position) return null;
-
-    const { position } = result;
-    const gstime = satellite.gstime(date);
-    const gd = satellite.eciToGeodetic(position, gstime);
-    if (!gd) return null;
-
-    const latitude = gd.latitude * 180 / Math.PI;
-    const longitude = satellite.degreesLong(gd.longitude);
-    const altitudeKm = gd.height;
+    if (!result?.position) return null;
+    const geo = satellite.eciToGeodetic(result.position, satellite.gstime(date));
+    if (!geo) return null;
+    const latitude = geo.latitude * 180 / Math.PI;
+    const longitude = satellite.degreesLong(geo.longitude);
+    const altitudeKm = geo.height;
     if (![latitude, longitude, altitudeKm].every(Number.isFinite) || altitudeKm < 0) return null;
-    const size = pointSize(entry.category || 'unknown');
-
-    return { latitude, longitude, altitudeKm, size };
-  } catch (err) {
+    return { latitude, longitude, altitudeKm };
+  } catch (_) {
     return null;
   }
 }
 
-/** Category → point size. */
 function pointSize(category) {
-  const base = {
-    crewed: 0.38, rocket_body: 0.28, debris: 0.18,
-    constellation: 0.24, gnss: 0.3, weather: 0.3,
-    payload: 0.24, unknown: 0.22,
+  const sizes = {
+    crewed: 2.7, rocket_body: 2.2, debris: 1.7,
+    constellation: 2, gnss: 2.4, weather: 2.4,
+    payload: 2, unknown: 1.9,
   };
-  return base[category] || base.unknown;
+  return sizes[category] || sizes.unknown;
 }
