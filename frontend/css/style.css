@@ -772,6 +772,39 @@ html, body {
   display: block;
 }
 
+#panel-graphs { width: min(620px, calc(100vw - 48px)); }
+#panel-graphs-content { min-width: 0; }
+.analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+.analysis-card {
+  min-width: 0;
+  height: 172px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: #1a1e2e;
+}
+.analysis-title {
+  flex: 0 0 auto;
+  margin-bottom: 8px;
+  font-size: .7rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+.analysis-chart-area {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.analysis-chart-area canvas { display: block; width: 100% !important; height: 100% !important; }
+
 .panel-description {
   color: var(--text-dim);
   font-size: 0.82rem;
@@ -1055,5 +1088,11 @@ html, body {
   .hud-card { bottom: auto; top: auto; left: 12px; right: 12px; bottom: 12px; width: auto; pointer-events: auto; }
   .glass-panel { top: auto; left: 12px; right: 12px; width: auto; bottom: 80px; max-height: 45vh; }
   .glass-panel.visible { display: block; }
+  #panel-graphs { width: auto; }
   #bottom-stats { bottom: 0; }
+}
+
+@media (max-width: 380px) {
+  .analysis-grid { grid-template-columns: minmax(0, 1fr); }
+  .analysis-card { height: 160px; }
 }

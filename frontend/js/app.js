@@ -6,14 +6,15 @@
  */
 
 import {
-  initGlobe, setCatalog as globeSetCatalog, setFilters, setSearch,
-  selectSatellite, hoverSatellite, updateSatMarker, drawOrbitPath,
-  followSatellite, setFollowMode, getCatalog, getSelectedNorad,
+  initGlobe, setCatalog as globeSetCatalog, setCatalogView,
+  selectSatellite, updateSatMarker, setFollowMode, getCatalog,
   setSatellitesVisible, setEarthVisible,
+  setOrbitsVisible,
   zoomIn, zoomOut, undoCamera, redoCamera,
-} from './globe.js?v=orbit-globe-20261023-10';
+  resetCameraView,
+} from './globe.js?v=orbit-fix-20261023-3';
 
-import { initCatalogUI, setCatalog as catalogSetCatalog } from './catalog-ui.js?v=orbit-globe-20261023-10';
+import { initCatalogUI, setCatalog as catalogSetCatalog, getFilteredEntries, setSelectedNorad, setHoveredNorad } from './catalog-ui.js?v=orbit-fix-20261023-3';
 
 // --- State -----------------------------------------------------------------
 
@@ -30,6 +31,7 @@ window.globeApp = {
   },
   onSatelliteSelected: (entry) => {
     currentSatId = entry.norad_id;
+    setSelectedNorad(currentSatId);
     const select = document.getElementById('sat-select');
     if (select) select.value = currentSatId;
     // Shareable URL hash
@@ -37,17 +39,17 @@ window.globeApp = {
     document.querySelectorAll('.glass-panel').forEach(panel => panel.classList.remove('visible'));
     document.getElementById('panel-info')?.classList.add('visible');
     window.switchInfoTab?.('overview');
-    loadSatellite(currentSatId);
     updateHudFromEntry(entry);
+    return loadSatellite(currentSatId);
   },
-  fetchAndDrawTrack: async (noradId) => {
-    try {
-      const track = await apiTrack(noradId, 90, 30);
-      drawOrbitPath(track.points);
-    } catch (err) {
-      console.warn('Could not fetch track:', err);
-    }
+  onSatelliteCleared: () => {
+    currentSatId = null;
+    setSelectedNorad(null);
+    document.querySelectorAll('.glass-panel').forEach(panel => panel.classList.remove('visible'));
+    const title = document.getElementById('hud-title');
+    if (title) title.textContent = 'Selected satellite is outside the current filters';
   },
+  onSatelliteHovered: (noradId, x, y) => setHoveredNorad(noradId, x, y),
 };
 
 // ===========================================================================
@@ -74,14 +76,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       const input = document.getElementById('catalog-search');
       const dropdown = document.getElementById('search-dropdown');
       renderSearchDropdown(input, dropdown, entries);
-      setFilters(filters);
-      // 'setSearch' here is globe.js's export (syncs text filter to the globe layer).
-      setSearch(searchQuery);
+      setCatalogView(filters, searchQuery);
     },
   });
   const searchInput = document.getElementById('catalog-search');
   const searchDropdown = document.getElementById('search-dropdown');
-  searchInput?.addEventListener('focus', () => renderSearchDropdown(searchInput, searchDropdown, getCatalog()));
+  searchInput?.addEventListener('focus', () => renderSearchDropdown(searchInput, searchDropdown, getFilteredEntries()));
   searchInput?.addEventListener('keydown', event => {
     if (event.key === 'Escape' && searchDropdown) searchDropdown.style.display = 'none';
     if (event.key === 'Enter') searchDropdown?.querySelector('.result-item')?.click();
@@ -110,13 +110,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     hideLoading(`Catalog loaded: ${entries.length} objects from ${catalog.source}${staleText}`);
     // Update source info in bottom status bar
     updateSourceInfo(catalog.source, catalog.stale);
-    // 5. Populate satellite dropdown (legacy) - only after catalog loads
-    try {
-      const list = await apiSatellites();
-      populateDropdown(list.satellites, currentSatId);
-    } catch (err) {
-      console.warn('Could not populate satellite dropdown:', err);
-    }
   } catch (err) {
     // Catalog failed - show visible error with Retry button instead of silent "0 of 0"
     console.warn('Could not load catalog:', err);
@@ -142,7 +135,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (hashMatch) currentSatId = parseInt(hashMatch[1], 10);
 
   // 8. Load initial satellite
-  await loadSatellite(currentSatId);
+  if (getCatalog().some(item => Number(item.norad_id) === Number(currentSatId))) {
+    await selectSatellite(currentSatId);
+  } else {
+    await loadSatellite(currentSatId);
+  }
 
 // 10. Position polling is handled by the Web Worker via onmessage
   startPolling();
@@ -157,8 +154,8 @@ function setupEventListeners() {
   const select = document.getElementById('sat-select');
   if (select) {
     select.addEventListener('change', async (e) => {
-      currentSatId = parseInt(e.target.value, 10);
-      await loadSatellite(currentSatId);
+      const noradId = Number.parseInt(e.target.value, 10);
+      if (Number.isFinite(noradId)) await selectSatellite(noradId);
     });
   }
 
@@ -238,12 +235,24 @@ function setupEventListeners() {
       setEarthVisible(visible);
     });
   }
+  const btnToggleOrbits = document.getElementById('btn-toggle-orbits');
+  if (btnToggleOrbits) {
+    btnToggleOrbits.setAttribute('aria-pressed', 'true');
+    btnToggleOrbits.classList.add('active');
+    btnToggleOrbits.addEventListener('click', () => {
+      const visible = btnToggleOrbits.getAttribute('aria-pressed') !== 'true';
+      btnToggleOrbits.setAttribute('aria-pressed', String(visible));
+      btnToggleOrbits.classList.toggle('active', visible);
+      setOrbitsVisible(visible);
+    });
+  }
 
   const cameraActions = {
     'btn-zoom-in': zoomIn,
     'btn-zoom-out': zoomOut,
     'btn-undo': undoCamera,
     'btn-redo': redoCamera,
+    'btn-reset-view': resetCameraView,
   };
   for (const [id, action] of Object.entries(cameraActions)) {
     document.getElementById(id)?.addEventListener('click', action);
@@ -320,7 +329,7 @@ function renderSearchDropdown(input, dropdown, entries) {
   if (!input || !dropdown) return;
   const q = input.value.toLowerCase().trim();
   if (!q && document.activeElement !== input) { dropdown.style.display = 'none'; return; }
-  const catalog = getCatalog();
+  const catalog = Array.isArray(entries) ? entries : [];
   const matches = catalog.filter(e => {
     const haystack = [
       e.name || '', String(e.norad_id || ''), e.intl_designator || '',
@@ -417,9 +426,8 @@ async function loadSatellite(noradId) {
   }
 
   try {
-    const [positionResult, trackResult, elementsResult] = await Promise.allSettled([
+    const [positionResult, elementsResult] = await Promise.allSettled([
       apiPosition(noradId),
-      apiTrack(noradId, 90, 30),
       apiElements(noradId),
     ]);
     const pos = positionResult.status === 'fulfilled'
@@ -428,16 +436,12 @@ async function loadSatellite(noradId) {
     if (!pos) throw positionResult.status === 'rejected'
       ? positionResult.reason
       : new Error('No orbital elements are available for this satellite.');
-    const track = trackResult.status === 'fulfilled'
-      ? trackResult.value
-      : { points: propagateOmmTrack(entry, pos.utc_time) };
     const elems = elementsResult.status === 'fulfilled'
       ? elementsResult.value
       : orbitalElementsFromOmm(entry);
 
     // Update globe
     updateSatMarker(pos.latitude, pos.longitude, pos.altitude_km, pos.name);
-    if (track.points?.length) drawOrbitPath(track.points);
 
     // Update info panel
     updatePositionPanel(pos);
@@ -520,25 +524,6 @@ function groundTrackHeading(latitude, longitude, nextLatitude, nextLongitude) {
   return { degrees, direction: compass };
 }
 
-function propagateOmmTrack(entry, startTime) {
-  const satrec = createOmmSatrec(entry);
-  const meanMotion = Number(entry?.omm?.MEAN_MOTION);
-  if (!satrec || !(meanMotion > 0)) return [];
-  const start = Date.parse(startTime) || Date.now();
-  const periodMinutes = 1440 / meanMotion;
-  const points = [];
-  for (let i = 0; i <= 120; i++) {
-    const date = new Date(start + periodMinutes * 60000 * i / 120);
-    try {
-      const result = window.satellite.propagate(satrec, date);
-      if (!result?.position) continue;
-      const geo = window.satellite.eciToGeodetic(result.position, window.satellite.gstime(date));
-      if (geo) points.push({ lat: geo.latitude * 180 / Math.PI, lng: window.satellite.degreesLong(geo.longitude), alt: Math.max(0.0005, geo.height / 6371) });
-    } catch (_) { /* Skip invalid points while retaining the rest of the orbit. */ }
-  }
-  return points;
-}
-
 function orbitalElementsFromOmm(entry) {
   const omm = entry?.omm;
   if (!omm) return null;
@@ -593,6 +578,7 @@ function startPolling() {
 }
 
 async function pollPosition() {
+  if (currentSatId == null) return;
   const entry = getCatalog().find(item => Number(item.norad_id) === Number(currentSatId));
   try {
     let pos;

@@ -83,7 +83,12 @@ def test_catalog_dedup_prioritizes_keeptrack(monkeypatch):
     )
     data = catalog_service.get_catalog()
     norads = [o["norad_id"] for o in data["objects"]]
-    assert norads == [25544, 48274]
+    # Fresh upstream rows take precedence while the bundled snapshot fills
+    # catalog coverage during the refresh window.
+    assert norads.count(25544) == 1
+    assert norads.count(48274) == 1
+    assert data["count"] >= 5000
+    assert "retlector snapshot" in data["sources"]
     iss = next(o for o in data["objects"] if o["norad_id"] == 25544)
     assert iss["name"] == "ISS (ZARYA)"
     assert iss["source"] == "keeptrack"
@@ -101,8 +106,8 @@ def test_catalog_missing_satcat_rows_remain_valid(monkeypatch):
         satcat={},
     )
     data = catalog_service.get_catalog()
-    assert data["count"] == 1
-    entry = data["objects"][0]
+    assert data["count"] >= 5000
+    entry = next(item for item in data["objects"] if item["norad_id"] == 48274)
     assert entry["norad_id"] == 48274
     # Missing SATCAT metadata must not make the entry invalid.
     assert entry["category"] == "crewed"

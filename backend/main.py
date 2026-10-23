@@ -10,7 +10,7 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import DEFAULT_SATELLITES, SATELLITE_GROUPS, KEEPTRACK_API_KEY
@@ -103,7 +103,7 @@ async def get_catalog_endpoint(
         data = get_catalog(force_refresh=refresh)
     except CatalogError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
-    return JSONResponse(content=data)
+    return data
 
 
 

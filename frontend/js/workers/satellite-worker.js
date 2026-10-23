@@ -1,49 +1,83 @@
 /**
  * satellite-worker.js – Web Worker that computes satellite positions.
- * Loads satellite.js from CDN, propagates TLE/OMM orbits to geodetic
- * (lat/lon/alt), and converts to Three.js globe units (Earth radius = 1).
+ * Propagates catalog positions in a worker and computes an orbit only on selection.
  *
  * Messages:
  *   { type: 'INIT', catalog: CatalogEntry[] }
  *   { type: 'COMPUTE', time: number }
+ *   { type: 'SELECT', norad_id: number, time: number }
  *
  * Reply:
- *   { type: 'POSITIONS', positions, colors, sizes, valid }
+ *   { type: 'POSITIONS', positions: [latitude, longitude, altitudeKm...], sizes, valid }
  */
 
 importScripts('/vendor/satellite.min.js');
 
 const EARTH_RADIUS_KM = 6371.0;
 let catalog = [];
-let orbitCatalog = [];
 let satrecs = {};
 let ready = false;
+let initIndex = 0;
+let initGeneration = 0;
+let pendingTime = null;
+let pendingSelection = null;
+const INIT_BATCH_SIZE = 250;
 
 self.addEventListener('message', (e) => {
   const { type } = e.data;
   if (type === 'INIT') {
     catalog = e.data.catalog || [];
-    orbitCatalog = e.data.orbitCatalog || catalog;
     satrecs = {};
-    const records = new Map([...catalog, ...orbitCatalog].map(entry => [entry.norad_id, entry]));
-    for (const entry of records.values()) {
-      const satrec = buildSatrec(entry);
-      if (satrec) satrecs[entry.norad_id] = satrec;
-    }
-    ready = true;
-    self.postMessage({ type: 'READY', count: Object.keys(satrecs).length });
-    computeOrbitPaths();
+    ready = false;
+    initIndex = 0;
+    pendingTime = null;
+    pendingSelection = null;
+    const generation = ++initGeneration;
+    initializeCatalogBatch(generation);
   } else if (type === 'COMPUTE') {
-    if (!ready) return;
-    computePositions(e.data.time);
+    pendingTime = e.data.time;
+    if (ready) {
+      computePositions(pendingTime);
+      pendingTime = null;
+    }
+  } else if (type === 'SELECT') {
+    pendingSelection = { norad_id: e.data.norad_id, time: e.data.time };
+    if (ready) {
+      computeSelectedOrbit(pendingSelection.norad_id, pendingSelection.time);
+      pendingSelection = null;
+    }
   }
 });
+
+function initializeCatalogBatch(generation) {
+  if (generation !== initGeneration) return;
+  const end = Math.min(initIndex + INIT_BATCH_SIZE, catalog.length);
+  for (; initIndex < end; initIndex++) {
+    const entry = catalog[initIndex];
+    const satrec = buildSatrec(entry);
+    if (satrec) satrecs[entry.norad_id] = satrec;
+  }
+  self.postMessage({ type: 'INIT_PROGRESS', processed: initIndex, total: catalog.length });
+  if (initIndex < catalog.length) {
+    setTimeout(() => initializeCatalogBatch(generation), 0);
+    return;
+  }
+  ready = true;
+  self.postMessage({ type: 'READY', count: Object.keys(satrecs).length });
+  if (pendingTime != null) {
+    computePositions(pendingTime);
+    pendingTime = null;
+  }
+  if (pendingSelection) {
+    computeSelectedOrbit(pendingSelection.norad_id, pendingSelection.time);
+    pendingSelection = null;
+  }
+}
 
 function computePositions(timeMs) {
   const date = new Date(timeMs);
   const n = catalog.length;
   const positions = new Float32Array(n * 3);
-  const colors = new Float32Array(n * 3);
   const sizes = new Float32Array(n);
   const valid = new Uint8Array(n);
 
@@ -53,64 +87,50 @@ function computePositions(timeMs) {
     if (!satrec) { valid[i] = 0; continue; }
     const result = propagatePosition(satrec, date, entry);
     if (!result) { valid[i] = 0; continue; }
-    positions[i * 3] = result.x;
-    positions[i * 3 + 1] = result.y;
-    positions[i * 3 + 2] = result.z;
-    colors[i * 3] = result.color[0];
-    colors[i * 3 + 1] = result.color[1];
-    colors[i * 3 + 2] = result.color[2];
+    positions[i * 3] = result.latitude;
+    positions[i * 3 + 1] = result.longitude;
+    positions[i * 3 + 2] = result.altitudeKm;
     sizes[i] = result.size;
     valid[i] = 1;
   }
 
   self.postMessage({
-    type: 'POSITIONS', positions, colors, sizes, valid,
-  }, [positions.buffer, colors.buffer, sizes.buffer, valid.buffer]);
+    type: 'POSITIONS', positions, sizes, valid,
+  }, [positions.buffer, sizes.buffer, valid.buffer]);
 }
 
-// Build one complete orbit for every propagated catalog entry once. These
-// paths remain visible and clickable while the live satellite dots update.
-function computeOrbitPaths() {
-  const now = Date.now();
-  const samples = orbitCatalog.length > 10000 ? 32 : 48;
-  const paths = [];
-  for (const entry of orbitCatalog) {
-    const satrec = satrecs[entry.norad_id];
-    if (!satrec || !(satrec.no > 0)) continue;
-    const periodMinutes = 2 * Math.PI / satrec.no;
-    const points = [];
-    const segments = [];
-    let previousLongitude = null;
-    for (let i = 0; i <= samples; i++) {
-      const date = new Date(now + periodMinutes * 60000 * i / samples);
-      const result = satellite.propagate(satrec, date);
-      if (!result?.position) continue;
-      const geo = satellite.eciToGeodetic(result.position, satellite.gstime(date));
-      if (!geo) continue;
-      const longitude = satellite.degreesLong(geo.longitude);
-      if (previousLongitude !== null && Math.abs(longitude - previousLongitude) > 180) {
-        if (points.length > 1) segments.push(points.splice(0));
-        else points.length = 0;
-      }
-      points.push({
-        lat: geo.latitude * 180 / Math.PI,
-        lng: longitude,
-        alt: Math.max(0.003, (geo.height || 0) / EARTH_RADIUS_KM),
-      });
-      previousLongitude = longitude;
-    }
-    if (points.length > 1) segments.push(points);
-    const color = orbitColor(entry.category);
-    for (const segment of segments) {
-      paths.push({ norad_id: entry.norad_id, name: entry.name, color, points: segment });
-    }
+// A selected orbit uses 180 propagation samples across one full period.
+function computeSelectedOrbit(noradId, timeMs) {
+  const satrec = satrecs[noradId];
+  const entry = catalog.find(item => Number(item.norad_id) === Number(noradId));
+  if (!satrec || !entry || !(satrec.no > 0)) {
+    self.postMessage({ type: 'ORBITS', norad_id: noradId, paths: [] });
+    return;
   }
-  self.postMessage({ type: 'ORBITS', paths });
-}
-
-function orbitColor(category) {
-  // All orbits are green for consistent visibility like satellitetracker3d.com
-  return '#00ff00';
+  const periodMinutes = 2 * Math.PI / satrec.no;
+  const paths = [];
+  let segment = [];
+  let previousLongitude = null;
+  for (let i = 0; i <= 180; i++) {
+    const date = new Date(Number(timeMs) + periodMinutes * 60000 * i / 180);
+    const result = satellite.propagate(satrec, date);
+    if (!result?.position) continue;
+    const geo = satellite.eciToGeodetic(result.position, satellite.gstime(date));
+    if (!geo || !Number.isFinite(geo.height)) continue;
+    const longitude = satellite.degreesLong(geo.longitude);
+    if (previousLongitude !== null && Math.abs(longitude - previousLongitude) > 180) {
+      if (segment.length > 1) paths.push({ norad_id: entry.norad_id, name: entry.name, points: segment });
+      segment = [];
+    }
+    segment.push({
+      lat: geo.latitude * 180 / Math.PI,
+      lng: longitude,
+      alt: Math.max(0, geo.height / EARTH_RADIUS_KM),
+    });
+    previousLongitude = longitude;
+  }
+  if (segment.length > 1) paths.push({ norad_id: entry.norad_id, name: entry.name, points: segment });
+  self.postMessage({ type: 'ORBITS', norad_id: entry.norad_id, paths });
 }
 
 /**
@@ -120,10 +140,12 @@ function orbitColor(category) {
 function buildSatrec(entry) {
   try {
     if (entry.line1 && entry.line2) {
-      return satellite.twoline2satrec(entry.line1, entry.line2);
+      const satrec = satellite.twoline2satrec(entry.line1, entry.line2);
+      return satrec?.error === 0 ? satrec : null;
     }
     if (entry.omm && typeof satellite.json2satrec === 'function') {
-      return satellite.json2satrec(entry.omm);
+      const satrec = satellite.json2satrec(entry.omm);
+      return satrec?.error === 0 ? satrec : null;
     }
     return null;
   } catch (err) {
@@ -133,8 +155,7 @@ function buildSatrec(entry) {
 }
 
 /**
- * Propagate a satrec to a date and return {x, y, z, color, size}
- * in globe units (Earth radius = 1).
+ * Propagate a satrec to geodetic latitude, longitude and altitude (km).
  */
 function propagatePosition(satrec, date, entry) {
   try {
@@ -146,48 +167,24 @@ function propagatePosition(satrec, date, entry) {
     const gd = satellite.eciToGeodetic(position, gstime);
     if (!gd) return null;
 
-    const latRad = gd.latitude;
-    const lonRad = gd.longitude;
-    const altKm = gd.height || 0;
-
-    const phi = Math.PI / 2 - latRad;
-    const theta = lonRad + Math.PI;
-    const r = 1.0 + altKm / EARTH_RADIUS_KM;
-
-    const x = -r * Math.sin(phi) * Math.cos(theta);
-    const y = r * Math.cos(phi);
-    const z = r * Math.sin(phi) * Math.sin(theta);
-
-    const color = categoryColor(entry.category || 'unknown');
+    const latitude = gd.latitude * 180 / Math.PI;
+    const longitude = satellite.degreesLong(gd.longitude);
+    const altitudeKm = gd.height;
+    if (![latitude, longitude, altitudeKm].every(Number.isFinite) || altitudeKm < 0) return null;
     const size = pointSize(entry.category || 'unknown');
 
-    return { x, y, z, color, size };
+    return { latitude, longitude, altitudeKm, size };
   } catch (err) {
     return null;
   }
 }
 
-/** Category → RGB color (0..1). */
-function categoryColor(category) {
-  const map = {
-    crewed:     [0.0, 1.0, 0.53],
-    rocket_body:[1.0, 0.67, 0.0],
-    debris:     [1.0, 0.27, 0.27],
-    constellation:[0.0, 0.83, 1.0],
-    gnss:       [0.67, 0.0, 1.0],
-    weather:    [1.0, 0.67, 0.0],
-    payload:    [1.0, 1.0, 1.0],
-    unknown:    [0.4, 0.4, 0.4],
-  };
-  return map[category] || map.unknown;
-}
-
 /** Category → point size. */
 function pointSize(category) {
   const base = {
-    crewed: 0.014, rocket_body: 0.010, debris: 0.006,
-    constellation: 0.008, gnss: 0.010, weather: 0.010,
-    payload: 0.008, unknown: 0.006,
+    crewed: 0.38, rocket_body: 0.28, debris: 0.18,
+    constellation: 0.24, gnss: 0.3, weather: 0.3,
+    payload: 0.24, unknown: 0.22,
   };
   return base[category] || base.unknown;
 }

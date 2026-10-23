@@ -17,11 +17,12 @@
  *   getSelectedNorad() / getHoveredNorad()
  */
 
+import { filterSatelliteEntries } from './satellite-utils.mjs?v=orbit-fix-20261023-3';
+
 const DEFAULT_DEBOUNCE_MS = 150;
 
 // --- Module state ---------------------------------------------------------
 let catalog = [];
-let haystacks = [];       // haystacks[i] – precomputed lowercase search text for catalog[i]
 let noradIndex = new Map(); // String(norad_id) -> entry
 let filteredIds = new Set();
 let searchQuery = '';
@@ -75,53 +76,11 @@ const FILTER_CONFIGS = {
   country: {},
 };
 
-// --- Pure helpers ---------------------------------------------------------
-
-function buildHaystack(entry) {
-  return [
-    entry.name || '', String(entry.norad_id || ''),
-    entry.intl_designator || '', entry.country || '', entry.object_type || '',
-  ].join(' ').toLowerCase();
-}
-
-function normalizeObjectType(entry) {
-  return (entry.object_type || 'UNK').replace(/\s+/g, '_').toUpperCase();
-}
-
-function matchesCategory(entry) {
-  if (filters.category.size === 0) return true;
-  return filters.category.has(entry.category || 'unknown');
-}
-
-function matchesRegime(entry) {
-  if (filters.regime.size === 0) return true;
-  return filters.regime.has(entry.orbit_regime || 'unknown');
-}
-
-function matchesObjectType(entry) {
-  if (filters.objectType.size === 0) return true;
-  return filters.objectType.has(normalizeObjectType(entry));
-}
-
-function matchesCountry(entry) {
-  if (filters.country.size === 0) return true;
-  return filters.country.has(entry.country || 'unknown');
-}
-
 // --- Filter pipeline ------------------------------------------------------
 
 function applyFilters() {
-  filteredIds = new Set();
-  const q = searchQuery;
-  for (let i = 0; i < catalog.length; i++) {
-    const entry = catalog[i];
-    if (q && !haystacks[i].includes(q)) continue;
-    if (!matchesCategory(entry)) continue;
-    if (!matchesRegime(entry)) continue;
-    if (!matchesObjectType(entry)) continue;
-    if (!matchesCountry(entry)) continue;
-    filteredIds.add(entry.norad_id);
-  }
+  filteredIds = new Set(filterSatelliteEntries(catalog, searchQuery, filters)
+    .map(entry => String(entry.norad_id)));
 }
 
 function refresh() {
@@ -152,13 +111,12 @@ export function initCatalogUI(opts = {}) {
 }
 
 export function setCatalog(entries) {
-  catalog = entries || [];
+  catalog = Array.isArray(entries) ? entries : [];
   const countries = [...new Set(catalog.map(entry => entry.country || 'unknown'))].sort();
   FILTER_CONFIGS.country = Object.fromEntries(countries.map(country => [country, {
     label: country, color: '#c7d2e0',
   }]));
   buildFilterChips('country-filters', FILTER_CONFIGS.country, 'country');
-  haystacks = catalog.map(buildHaystack);
   noradIndex = new Map();
   for (const entry of catalog) {
     const id = entry.norad_id;
@@ -170,7 +128,7 @@ export function setCatalog(entries) {
 }
 
 export function getFilteredEntries() {
-  return catalog.filter(e => filteredIds.has(e.norad_id));
+  return catalog.filter(e => filteredIds.has(String(e.norad_id)));
 }
 
 export function getEntryByNorad(noradId) {
@@ -210,6 +168,7 @@ export function getActiveFilters() {
     category: new Set(filters.category),
     regime: new Set(filters.regime),
     objectType: new Set(filters.objectType),
+    country: new Set(filters.country),
   };
 }
 
@@ -219,9 +178,9 @@ export function setSelectedNorad(noradId) {
   if (el) el.style.display = 'none';
 }
 
-export function setHoveredNorad(noradId) {
+export function setHoveredNorad(noradId, x, y) {
   window.hoveredNorad = noradId;
-  updateTooltip();
+  updateTooltip(x, y);
 }
 
 export function getSelectedNorad() {
@@ -314,7 +273,7 @@ function wireFilterEvents() {
   }
 }
 
-function updateTooltip() {
+function updateTooltip(x, y) {
   const el = document.getElementById('hover-tooltip');
   if (!el) return;
   if (window.hoveredNorad === null) { el.style.display = 'none'; return; }
@@ -326,6 +285,8 @@ function updateTooltip() {
     ${entry.category ? `<div class="tip-meta">[${escapeHtml(entry.category)}]</div>` : ''}
     ${entry.orbit_regime ? `<div class="tip-meta">${escapeHtml(entry.orbit_regime)}</div>` : ''}
   `;
+  if (Number.isFinite(x)) el.style.left = `${x}px`;
+  if (Number.isFinite(y)) el.style.top = `${y}px`;
   el.style.display = 'block';
 }
 

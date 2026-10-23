@@ -246,33 +246,26 @@ function renderGraphsPanel() {
   ];
 
   const grid = document.createElement('div');
-  grid.style.display = 'grid';
-  grid.style.gridTemplateColumns = '1fr 1fr';
-  grid.style.gap = '12px';
+  grid.className = 'analysis-grid';
 
   for (const m of metrics) {
     const card = document.createElement('div');
-    card.style.background = '#1a1e2e';
-    card.style.border = '1px solid var(--panel-border)';
-    card.style.borderRadius = '8px';
-    card.style.padding = '10px';
-    card.style.display = 'flex';
-    card.style.flexDirection = 'column';
+    card.className = 'analysis-card';
 
     const title = document.createElement('div');
     title.textContent = m.label;
-    title.style.fontSize = '0.7rem';
+    title.className = 'analysis-title';
     title.style.color = m.color;
-    title.style.textTransform = 'uppercase';
-    title.style.letterSpacing = '1px';
-    title.style.marginBottom = '8px';
 
     const canvas = document.createElement('canvas');
     canvas.id = m.id;
-    canvas.height = 120;
+    canvas.setAttribute('aria-label', m.label);
+    const chartArea = document.createElement('div');
+    chartArea.className = 'analysis-chart-area';
+    chartArea.appendChild(canvas);
 
     card.appendChild(title);
-    card.appendChild(canvas);
+    card.appendChild(chartArea);
     grid.appendChild(card);
   }
 
@@ -293,8 +286,8 @@ function renderGraphsPanel() {
       options: { responsive: true, maintainAspectRatio: false, animation: { duration: 0 },
         plugins: { legend: { display: false } },
         scales: {
-          x: { display: true, ticks: { color: '#8892a0', maxTicksLimit: 5, font: { size: 9 } }, grid: { color: '#1e2a3a40' } },
-          y: { display: true, ticks: { color: '#8892a0', font: { size: 9 } }, grid: { color: '#1e2a3a40' } },
+          x: { display: true, title: { display: true, text: 'Orbit progress (%)', color: '#8892a0', font: { size: 8 } }, ticks: { color: '#8892a0', maxTicksLimit: 5, font: { size: 9 } }, grid: { color: '#1e2a3a40' } },
+          y: { display: true, title: { display: true, text: m.label, color: '#8892a0', font: { size: 8 } }, ticks: { color: '#8892a0', font: { size: 9 } }, grid: { color: '#1e2a3a40' } },
         },
       }});
   }
