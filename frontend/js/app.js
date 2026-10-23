@@ -11,7 +11,7 @@ import {
   setSatellitesVisible, setEarthVisible,
   setOrbitsVisible,
   zoomIn, zoomOut, resetCameraView, previousSatellite, nextSatellite,
-} from './globe.js?v=orbit-buffer-20261023-1';
+} from './globe.js?v=orbit-fix-20261023-4';
 
 import { initCatalogUI, setCatalog as catalogSetCatalog, getFilteredEntries, setSelectedNorad, setHoveredNorad } from './catalog-ui.js?v=orbit-fix-20261023-4';
 
@@ -55,7 +55,7 @@ window.globeApp = {
 // Initialisation
 // ===========================================================================
 
-const initializeApp = async () => {
+document.addEventListener('DOMContentLoaded', async () => {
   // 1. Create the 3D globe + Points layer
   initGlobe('globe-container');
   // Wire the floating controls before any network requests. A slow catalog
@@ -320,14 +320,8 @@ function setupPanelTriggers() {
       document.querySelectorAll('.glass-panel').forEach(p => p.classList.remove('visible'));
     }
   });
-
-};
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initializeApp, { once: true });
-} else {
-  initializeApp();
 }
+
 
 
 // Render search autocomplete dropdown
