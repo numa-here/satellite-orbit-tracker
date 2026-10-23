@@ -10,11 +10,10 @@ import {
   selectSatellite, updateSatMarker, setFollowMode, getCatalog,
   setSatellitesVisible, setEarthVisible,
   setOrbitsVisible,
-  zoomIn, zoomOut, undoCamera, redoCamera,
-  resetCameraView,
-} from './globe.js?v=orbit-fix-20261023-3';
+  zoomIn, zoomOut, resetCameraView, previousSatellite, nextSatellite,
+} from './globe.js?v=orbit-fix-20261023-4';
 
-import { initCatalogUI, setCatalog as catalogSetCatalog, getFilteredEntries, setSelectedNorad, setHoveredNorad } from './catalog-ui.js?v=orbit-fix-20261023-3';
+import { initCatalogUI, setCatalog as catalogSetCatalog, getFilteredEntries, setSelectedNorad, setHoveredNorad } from './catalog-ui.js?v=orbit-fix-20261023-4';
 
 // --- State -----------------------------------------------------------------
 
@@ -250,13 +249,14 @@ function setupEventListeners() {
   const cameraActions = {
     'btn-zoom-in': zoomIn,
     'btn-zoom-out': zoomOut,
-    'btn-undo': undoCamera,
-    'btn-redo': redoCamera,
     'btn-reset-view': resetCameraView,
   };
   for (const [id, action] of Object.entries(cameraActions)) {
     document.getElementById(id)?.addEventListener('click', action);
   }
+
+  document.getElementById('btn-prev-satellite')?.addEventListener('click', previousSatellite);
+  document.getElementById('btn-next-satellite')?.addEventListener('click', nextSatellite);
 
   // Panel triggers: open/close floating glass panels
   setupPanelTriggers();

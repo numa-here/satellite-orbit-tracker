@@ -64,3 +64,12 @@ export function nearestSatellitePoint(points, coords, maxDegrees, isAllowed = ()
   }
   return nearest;
 }
+
+export function adjacentSatelliteEntry(entries, currentNoradId, direction) {
+  if (!Array.isArray(entries) || entries.length === 0 || ![-1, 1].includes(direction)) return null;
+  const currentIndex = entries.findIndex(entry => Number(entry?.norad_id) === Number(currentNoradId));
+  const nextIndex = currentIndex < 0
+    ? (direction > 0 ? 0 : entries.length - 1)
+    : (currentIndex + direction + entries.length) % entries.length;
+  return entries[nextIndex] || null;
+}

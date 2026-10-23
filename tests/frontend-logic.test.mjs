@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
 import { createRequire } from 'node:module';
-import { filterSatelliteEntries, geodeticToGlobePoint, nearestSatellitePoint } from '../frontend/js/satellite-utils.mjs';
+import { adjacentSatelliteEntry, filterSatelliteEntries, geodeticToGlobePoint, nearestSatellitePoint } from '../frontend/js/satellite-utils.mjs';
 
 const require = createRequire(import.meta.url);
 const satelliteJs = require('../frontend/vendor/satellite.min.js');
@@ -56,6 +56,16 @@ test('marker picking selects the nearest visible satellite within the click tole
   assert.equal(selected.norad_id, 2);
   assert.equal(nearestSatellitePoint(points, { lat: -40, lng: 30 }, 1), null);
   assert.equal(nearestSatellitePoint(points, { lat: NaN, lng: 30 }, 1), null);
+});
+
+test('previous and next satellite navigation wraps through the current filtered list', () => {
+  const entries = [catalog[0], catalog[1], catalog[2]];
+  assert.equal(adjacentSatelliteEntry(entries, 25544, 1).norad_id, 33591);
+  assert.equal(adjacentSatelliteEntry(entries, 25544, -1).norad_id, 36585);
+  assert.equal(adjacentSatelliteEntry(entries, 36585, 1).norad_id, 25544);
+  assert.equal(adjacentSatelliteEntry(entries, null, -1).norad_id, 36585);
+  assert.equal(adjacentSatelliteEntry([], 25544, 1), null);
+  assert.equal(adjacentSatelliteEntry(entries, 25544, 0), null);
 });
 
 test('worker emits selected full orbit paths in the same satellite and altitude scale', () => {

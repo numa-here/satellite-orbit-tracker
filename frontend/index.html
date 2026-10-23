@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Satellite Orbit Tracker</title>
-  <link rel="stylesheet" href="/css/style.css?v=orbit-fix-20261023-3" />
+  <link rel="stylesheet" href="/css/style.css?v=orbit-fix-20261023-4" />
 </head>
 <body>
 
@@ -16,14 +16,14 @@
         <span class="app-name">Satellite Tracker 3D</span>
       </div>
 
-      <!-- Top-center floating toolbar: globe and camera controls -->
+      <!-- Top-center floating toolbar: satellite and camera controls -->
       <div class="toolbar center-toolbar" id="center-toolbar">
         <button class="icon-btn" id="btn-toggle-sats" title="Toggle satellites">🛰️</button>
         <button class="icon-btn" id="btn-toggle-orbits" title="Toggle selected orbit" aria-label="Toggle selected orbit">〰️</button>
         <button class="icon-btn" id="btn-toggle-earth" title="Toggle Earth texture">🌍</button>
         <button class="icon-btn" id="btn-refresh" title="Refresh catalog">↻</button>
-        <button class="icon-btn" id="btn-undo" title="Undo camera zoom">↩</button>
-        <button class="icon-btn" id="btn-redo" title="Redo camera zoom">↪</button>
+        <button class="icon-btn" id="btn-prev-satellite" title="Previous satellite" aria-label="Previous satellite">←</button>
+        <button class="icon-btn" id="btn-next-satellite" title="Next satellite" aria-label="Next satellite">→</button>
         <button class="icon-btn" id="btn-reset-view" title="Reset globe view" aria-label="Reset globe view">⌂</button>
         <button class="icon-btn" id="btn-zoom-in" title="Zoom in">+</button>
         <button class="icon-btn" id="btn-zoom-out" title="Zoom out">-</button>
@@ -254,7 +254,7 @@
 
   <!-- App scripts -->
   <script src="/js/api.js?v=orbit-globe-20261023-70"></script>
-  <script src="/js/panel.js?v=orbit-fix-20261023-3"></script>
-  <script type="module" src="/js/app.js?v=orbit-fix-20261023-3"></script>
+  <script src="/js/panel.js?v=orbit-fix-20261023-4"></script>
+  <script type="module" src="/js/app.js?v=orbit-fix-20261023-4"></script>
 </body>
 </html>

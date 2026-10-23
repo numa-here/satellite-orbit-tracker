@@ -1,5 +1,5 @@
 /** 3D Earth and satellite catalog rendering. */
-import { filterSatelliteEntries, geodeticToGlobePoint, nearestSatellitePoint } from './satellite-utils.mjs?v=orbit-fix-20261023-3';
+import { adjacentSatelliteEntry, filterSatelliteEntries, geodeticToGlobePoint, nearestSatellitePoint } from './satellite-utils.mjs?v=orbit-fix-20261023-4';
 
 let globe = null;
 let worker = null;
@@ -8,6 +8,7 @@ let propagationEntries = [];
 let visibleEntries = [];
 let visibleNoradIds = new Set();
 let propagatedPoints = [];
+let propagatedNoradIds = new Set();
 let pointGrid = new Map();
 let activeFilters = {};
 let activeSearch = '';
@@ -24,8 +25,7 @@ let pendingComputeTime = null;
 let satellitesVisible = true;
 let orbitsVisible = true;
 let earthVisible = true;
-let cameraHistory = [];
-let cameraHistoryIndex = -1;
+const DEFAULT_CAMERA_VIEW = { lat: 20, lng: 0, altitude: 2.2 };
 
 const CATEGORY_COLORS = {
   crewed: '#00ff88', rocket_body: '#ffaa00', debris: '#ff4444',
@@ -137,10 +137,7 @@ export function initGlobe(containerId) {
     controls.autoRotateSpeed = 0.3;
     controls.minDistance = 1.05;
     controls.maxDistance = 10.1;
-    const initialView = { lat: 20, lng: 0, altitude: 2.2 };
-    globe.pointOfView(initialView, 0);
-    cameraHistory = [initialView];
-    cameraHistoryIndex = 0;
+    globe.pointOfView(DEFAULT_CAMERA_VIEW, 0);
     } catch (error) {
       console.error('3D globe initialization failed:', error);
       globe = null;
@@ -150,7 +147,7 @@ export function initGlobe(containerId) {
   }
 
   try {
-    worker = new Worker('/js/workers/satellite-worker.js?v=orbit-fix-20261023-3');
+    worker = new Worker('/js/workers/satellite-worker.js?v=orbit-fix-20261023-4');
     worker.onmessage = event => {
       if (event.data.type === 'INIT_PROGRESS') {
         showGlobeStatus(`Preparing satellite elements ${event.data.processed.toLocaleString()} / ${event.data.total.toLocaleString()}…`);
@@ -187,8 +184,10 @@ export function initGlobe(containerId) {
 
 export function setCatalog(entries) {
   catalogEntries = Array.isArray(entries) ? entries : [];
-  visibleEntries = filterSatelliteEntries(catalogEntries, activeSearch, activeFilters);
-  visibleNoradIds = new Set(visibleEntries.map(entry => Number(entry.norad_id)));
+  propagatedPoints = [];
+  propagatedNoradIds = new Set();
+  pointGrid = new Map();
+  applyCatalogVisibility();
   propagationEntries = catalogEntries;
   startComputeTimer(3000);
   if (worker) {
@@ -234,6 +233,7 @@ function renderPositions(data) {
     });
   }
   propagatedPoints = points;
+  propagatedNoradIds = new Set(points.map(point => Number(point.norad_id)));
   pointGrid = buildPointGrid(points);
   if (!points.length) {
     showGlobeStatus('Satellite positions are unavailable for the loaded orbital elements.');
@@ -334,6 +334,14 @@ export function selectSatellite(noradId) {
   applyOrbitVisibility();
   return window.globeApp?.onSatelliteSelected?.(entry);
 }
+function navigateSatellite(direction) {
+  const visibleValidEntries = visibleEntries.filter(entry => propagatedNoradIds.has(Number(entry.norad_id)));
+  const entry = adjacentSatelliteEntry(visibleValidEntries, selectedNorad, direction);
+  if (entry) return selectSatellite(entry.norad_id);
+  return null;
+}
+export function previousSatellite() { return navigateSatellite(-1); }
+export function nextSatellite() { return navigateSatellite(1); }
 export function hoverSatellite() {}
 export function getSelectedNorad() { return selectedNorad; }
 export function getHoveredNorad() { return null; }
@@ -405,9 +413,6 @@ export function setFollowMode(on) {
 
 function setTrackedCameraView(view) {
   if (!globe) return;
-  cameraHistory = cameraHistory.slice(0, cameraHistoryIndex + 1);
-  cameraHistory.push({ lat: view.lat, lng: view.lng, altitude: view.altitude });
-  cameraHistoryIndex = cameraHistory.length - 1;
   globe.pointOfView(view, 400);
 }
 
@@ -423,25 +428,9 @@ export function zoomOut() {
   setTrackedCameraView({ ...view, altitude: Math.min(9, view.altitude * 1.28) });
 }
 
-export function undoCamera() {
-  if (!globe || cameraHistoryIndex <= 0) {
-    return;
-  }
-  cameraHistoryIndex -= 1;
-  globe.pointOfView(cameraHistory[cameraHistoryIndex], 400);
-}
-
-export function redoCamera() {
-  if (!globe || cameraHistoryIndex >= cameraHistory.length - 1) {
-    return;
-  }
-  cameraHistoryIndex += 1;
-  globe.pointOfView(cameraHistory[cameraHistoryIndex], 400);
-}
-
 export function resetCameraView() {
   if (!globe) return;
-  setTrackedCameraView({ lat: 20, lng: 0, altitude: 2.2 });
+  setTrackedCameraView(DEFAULT_CAMERA_VIEW);
 }
 
 function showGlobeError(message) {
