@@ -118,7 +118,8 @@ function computeSelectedOrbit(noradId, timeMs) {
       continue;
     }
     const geo = satellite.eciToGeodetic(result.position, satellite.gstime(date));
-    if (!geo || !Number.isFinite(geo.height) || !Number.isFinite(geo.latitude) || !Number.isFinite(geo.longitude)) {
+    if (!geo || !Number.isFinite(geo.height) || !Number.isFinite(geo.latitude) || !Number.isFinite(geo.longitude)
+      || geo.height < 0) {
       if (segment.length > 1) paths.push({ norad_id: entry.norad_id, name: entry.name, points: segment });
       segment = [];
       previousLongitude = null;
@@ -132,7 +133,7 @@ function computeSelectedOrbit(noradId, timeMs) {
     segment.push({
       lat: geo.latitude * 180 / Math.PI,
       lng: longitude,
-      alt: Math.max(0, geo.height / EARTH_RADIUS_KM),
+      alt: geo.height / EARTH_RADIUS_KM,
     });
     previousLongitude = longitude;
   }

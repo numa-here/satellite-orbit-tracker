@@ -140,9 +140,7 @@ export function initGlobe(containerId) {
       pointerStart = null;
       if (!start || start.id !== event.pointerId
         || Math.hypot(event.clientX - start.x, event.clientY - start.y) > 6) return;
-      const bounds = canvas.getBoundingClientRect();
-      const coords = globe.toGlobeCoords(event.clientX - bounds.left, event.clientY - bounds.top);
-      const point = coords ? findNearestPoint(coords, 0.8) : null;
+      const point = findNearestRenderedPoint(event.clientX, event.clientY, canvas);
       if (point) selectSatellite(point.norad_id);
     }, { passive: true });
     canvas.addEventListener('pointercancel', () => { pointerStart = null; }, { passive: true });
@@ -171,7 +169,7 @@ export function initGlobe(containerId) {
   }
 
   try {
-    worker = new Worker('/js/workers/satellite-worker.js?v=orbit-points-20261024-2');
+    worker = new Worker('/js/workers/satellite-worker.js?v=orbit-picker-20261024-1');
     worker.onmessage = event => {
       if (event.data.type === 'INIT_PROGRESS') {
         showGlobeStatus(`Preparing satellite elements ${event.data.processed.toLocaleString()} / ${event.data.total.toLocaleString()}…`);
@@ -451,6 +449,56 @@ function findNearestPoint(coords, maxDegrees) {
   }
   return nearestSatellitePoint(candidates, coords, maxDegrees,
     point => visibleNoradIds.has(Number(point.norad_id)));
+}
+
+// Picking through globe.toGlobeCoords() maps the click to Earth's surface.
+// That is inaccurate for satellites several Earth radii above the surface.
+// Compare the click with each currently rendered point in screen space and
+// discard points hidden behind Earth.
+function findNearestRenderedPoint(clientX, clientY, canvas) {
+  if (!globe || !pointObject?.visible || !positionAttribute || !visibilityAttribute) return null;
+  const rect = canvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  const camera = globe.camera();
+  camera.updateMatrixWorld();
+  const cameraPosition = camera.getWorldPosition(new THREE.Vector3());
+  const pointPosition = new THREE.Vector3();
+  const globeRadius = globe.getGlobeRadius?.() || 100;
+  const radiusSquared = globeRadius * globeRadius * 0.99;
+  const coordinates = positionAttribute.array;
+  const visibility = visibilityAttribute.array;
+  let nearest = null;
+  let nearestDistanceSquared = 12 * 12;
+
+  for (let i = 0; i < visibility.length; i++) {
+    if (!visibility[i]) continue;
+    pointPosition.set(coordinates[i * 3], coordinates[i * 3 + 1], coordinates[i * 3 + 2]);
+    pointPosition.project(camera);
+    if (pointPosition.z < -1 || pointPosition.z > 1) continue;
+    const screenX = rect.left + (pointPosition.x + 1) * rect.width / 2;
+    const screenY = rect.top + (1 - pointPosition.y) * rect.height / 2;
+    const dx = screenX - clientX;
+    const dy = screenY - clientY;
+    const distanceSquared = dx * dx + dy * dy;
+    if (distanceSquared >= nearestDistanceSquared) continue;
+
+    if (earthVisible) {
+      const rayX = coordinates[i * 3] - cameraPosition.x;
+      const rayY = coordinates[i * 3 + 1] - cameraPosition.y;
+      const rayZ = coordinates[i * 3 + 2] - cameraPosition.z;
+      const rayLengthSquared = rayX * rayX + rayY * rayY + rayZ * rayZ;
+      const t = Math.max(0, Math.min(1,
+        -(cameraPosition.x * rayX + cameraPosition.y * rayY + cameraPosition.z * rayZ) / rayLengthSquared));
+      const closestX = cameraPosition.x + t * rayX;
+      const closestY = cameraPosition.y + t * rayY;
+      const closestZ = cameraPosition.z + t * rayZ;
+      if (t < 1 && closestX * closestX + closestY * closestY + closestZ * closestZ < radiusSquared) continue;
+    }
+
+    nearestDistanceSquared = distanceSquared;
+    nearest = propagationEntries[i];
+  }
+  return nearest;
 }
 
 function applyOrbitVisibility() {
