@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Satellite Orbit Tracker</title>
-  <link rel="stylesheet" href="/css/style.css?v=orbit-buffer-20261023-2" />
+  <link rel="stylesheet" href="/css/style.css?v=orbit-buffer-20261023-1" />
 </head>
 <body>
 
@@ -249,7 +249,7 @@
 
   <!-- Load Three.js first so globe.gl and the satellite layer share Three r172. -->
   <script type="module">
-    import * as THREE from '/vendor/three.module.min.js?v=orbit-buffer-20261023-2';
+    import * as THREE from '/vendor/three.module.min.js?v=orbit-buffer-20261023-1';
     window.THREE = THREE;
     const loadClassicScript = src => new Promise((resolve, reject) => {
       const script = document.createElement('script');
@@ -258,12 +258,12 @@
       script.onerror = reject;
       document.head.appendChild(script);
     });
-    await loadClassicScript('/vendor/globe.gl.min.js?v=orbit-buffer-20261023-2');
-    await loadClassicScript('/vendor/chart.umd.js?v=orbit-buffer-20261023-2');
-    await loadClassicScript('/vendor/satellite.min.js?v=orbit-buffer-20261023-2');
-    await loadClassicScript('/js/api.js?v=orbit-buffer-20261023-2');
-    await loadClassicScript('/js/panel.js?v=orbit-buffer-20261023-2');
-    await import('/js/app.js?v=orbit-buffer-20261023-2');
+    await loadClassicScript('/vendor/globe.gl.min.js?v=orbit-buffer-20261023-1');
+    await loadClassicScript('/vendor/chart.umd.js?v=orbit-buffer-20261023-1');
+    await loadClassicScript('/vendor/satellite.min.js?v=orbit-buffer-20261023-1');
+    await loadClassicScript('/js/api.js?v=orbit-buffer-20261023-1');
+    await loadClassicScript('/js/panel.js?v=orbit-buffer-20261023-1');
+    await import('/js/app.js?v=orbit-buffer-20261023-1');
   </script>
 </body>
 </html>
