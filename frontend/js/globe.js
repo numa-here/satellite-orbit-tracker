@@ -40,7 +40,7 @@ const DEFAULT_CAMERA_VIEW = { lat: 20, lng: 0, altitude: 2.2 };
 
 const PICK_GRID_DEGREES = 2;
 const MIN_CAMERA_ALTITUDE = 0.08;
-const MAX_CAMERA_ALTITUDE = 8.5;
+const MAX_CAMERA_ALTITUDE = 24;
 const DEFAULT_MARKER_SIZE_PX = 2.2;
 const SELECTED_MARKER_SIZE_PX = 4.2;
 const POINT_VERTEX_SHADER = `
@@ -88,11 +88,11 @@ export function initGlobe(containerId) {
       .pathPointLng(d => d.lng)
       .pathPointAlt(d => d.alt)
       .pathColor(path => path.selected ? '#ffec70' : '#00d4ff')
-      .pathLabel(path => `${path.name} · NORAD ${path.norad_id} · moving in the direction of the animated dashes`)
+      .pathLabel(path => `${path.name} · NORAD ${path.norad_id} · the highlighted marker follows this orbit`)
       .pathStroke(path => path.selected ? 2.0 : 1.2)
-      .pathDashLength(0.012)
-      .pathDashGap(0.008)
-      .pathDashAnimateTime(9000)
+      .pathDashLength(1)
+      .pathDashGap(0)
+      .pathDashAnimateTime(0)
       .onPathClick(path => selectSatellite(path.norad_id))
       (container);
 
@@ -169,7 +169,7 @@ export function initGlobe(containerId) {
   }
 
   try {
-    worker = new Worker('/js/workers/satellite-worker.js?v=orbit-picker-20261024-1');
+    worker = new Worker('/js/workers/satellite-worker.js?v=orbit-picker-20261024-2');
     worker.onmessage = event => {
       if (event.data.type === 'INIT_PROGRESS') {
         showGlobeStatus(`Preparing satellite elements ${event.data.processed.toLocaleString()} / ${event.data.total.toLocaleString()}…`);
@@ -190,6 +190,7 @@ export function initGlobe(containerId) {
         if (Number(event.data.norad_id) !== Number(selectedNorad)) return;
         selectedOrbitPaths = (event.data.paths || []).map(path => ({ ...path, selected: true }));
         applyOrbitVisibility();
+        fitCameraToSelectedOrbit(selectedOrbitPaths);
       }
     };
     worker.onerror = error => {
@@ -504,6 +505,28 @@ function findNearestRenderedPoint(clientX, clientY, canvas) {
 function applyOrbitVisibility() {
   if (!globe) return;
   globe.pathsData(orbitsVisible ? selectedOrbitPaths : []);
+}
+
+function fitCameraToSelectedOrbit(paths) {
+  if (!globe || !paths?.length) return;
+  const renderer = globe.renderer();
+  const camera = globe.camera();
+  const canvas = renderer.domElement;
+  const aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight);
+  const verticalHalfFov = camera.fov * Math.PI / 360;
+  const horizontalHalfFov = Math.atan(Math.tan(verticalHalfFov) * aspect);
+  const limitingHalfFov = Math.min(verticalHalfFov, horizontalHalfFov);
+  let maxRadiusRatio = 1;
+  for (const path of paths) {
+    for (const point of path.points || []) {
+      if (Number.isFinite(point.alt)) maxRadiusRatio = Math.max(maxRadiusRatio, 1 + point.alt);
+    }
+  }
+  const requiredAltitude = maxRadiusRatio / Math.sin(limitingHalfFov) * 1.08 - 1;
+  const view = globe.pointOfView();
+  if (requiredAltitude > view.altitude + 0.1) {
+    globe.pointOfView({ ...view, altitude: Math.min(MAX_CAMERA_ALTITUDE, requiredAltitude) }, 700);
+  }
 }
 
 export function selectSatellite(noradId) {

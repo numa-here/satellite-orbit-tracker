@@ -108,6 +108,8 @@ function computeSelectedOrbit(noradId, timeMs) {
   const paths = [];
   let segment = [];
   let previousLongitude = null;
+  let previousLatitude = null;
+  let previousAltitude = null;
   for (let i = 0; i <= 180; i++) {
     const date = new Date(Number(timeMs) + periodMinutes * 60000 * i / 180);
     const result = satellite.propagate(satrec, date);
@@ -115,6 +117,8 @@ function computeSelectedOrbit(noradId, timeMs) {
       if (segment.length > 1) paths.push({ norad_id: entry.norad_id, name: entry.name, points: segment });
       segment = [];
       previousLongitude = null;
+      previousLatitude = null;
+      previousAltitude = null;
       continue;
     }
     const geo = satellite.eciToGeodetic(result.position, satellite.gstime(date));
@@ -123,19 +127,34 @@ function computeSelectedOrbit(noradId, timeMs) {
       if (segment.length > 1) paths.push({ norad_id: entry.norad_id, name: entry.name, points: segment });
       segment = [];
       previousLongitude = null;
+      previousLatitude = null;
+      previousAltitude = null;
       continue;
     }
     const longitude = satellite.degreesLong(geo.longitude);
+    const latitude = geo.latitude * 180 / Math.PI;
+    const altitude = geo.height / EARTH_RADIUS_KM;
     if (previousLongitude !== null && Math.abs(longitude - previousLongitude) > 180) {
+      const adjustedLongitude = longitude + (longitude < previousLongitude ? 360 : -360);
+      const seamLongitude = previousLongitude > 0 ? 180 : -180;
+      const fraction = (seamLongitude - previousLongitude) / (adjustedLongitude - previousLongitude);
+      const seamPoint = {
+        lat: previousLatitude + (latitude - previousLatitude) * fraction,
+        lng: seamLongitude,
+        alt: previousAltitude + (altitude - previousAltitude) * fraction,
+      };
+      segment.push(seamPoint);
       if (segment.length > 1) paths.push({ norad_id: entry.norad_id, name: entry.name, points: segment });
-      segment = [];
+      segment = [{ ...seamPoint, lng: -seamLongitude }];
     }
     segment.push({
-      lat: geo.latitude * 180 / Math.PI,
+      lat: latitude,
       lng: longitude,
-      alt: geo.height / EARTH_RADIUS_KM,
+      alt: altitude,
     });
     previousLongitude = longitude;
+    previousLatitude = latitude;
+    previousAltitude = altitude;
   }
   if (segment.length > 1) paths.push({ norad_id: entry.norad_id, name: entry.name, points: segment });
   self.postMessage({ type: 'ORBITS', norad_id: entry.norad_id, paths });

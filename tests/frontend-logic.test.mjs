@@ -109,7 +109,7 @@ test('worker emits selected full orbit paths in the same satellite and altitude 
   const orbit = messages.find(message => message.type === 'ORBITS');
   assert.equal(orbit.norad_id, 25544);
   const allPoints = orbit.paths.flatMap(path => path.points);
-  assert.equal(allPoints.length, 181);
+  assert.ok(allPoints.length >= 181);
   assert.ok(orbit.paths.length >= 1);
   assert.ok(allPoints.every(point => point.lat >= -90 && point.lat <= 90));
   assert.ok(allPoints.every(point => point.alt === 400 / 6371));
@@ -150,7 +150,7 @@ test('bundled satellite.js propagates the cached ISS OMM into visible positions 
   const orbit = messages.find(message => message.type === 'ORBITS');
   assert.equal(orbit.norad_id, 25544);
   const allPoints = orbit.paths.flatMap(path => path.points);
-  assert.equal(allPoints.length, 181);
+  assert.ok(allPoints.length >= 181);
   assert.ok(allPoints.every(point => Number.isFinite(point.lat) && Number.isFinite(point.lng)));
   assert.ok(allPoints.every(point => point.alt > 0.05 && point.alt < 0.1));
 });

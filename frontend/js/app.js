@@ -11,7 +11,7 @@ import {
   setSatellitesVisible, setEarthVisible,
   setOrbitsVisible,
   zoomIn, zoomOut, resetCameraView, previousSatellite, nextSatellite,
-} from './globe.js?v=orbit-picker-20261024-1';
+} from './globe.js?v=orbit-picker-20261024-2';
 
 import { initCatalogUI, setCatalog as catalogSetCatalog, getFilteredEntries, setSelectedNorad, setHoveredNorad } from './catalog-ui.js?v=orbit-points-20261024-2';
 
