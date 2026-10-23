@@ -443,25 +443,61 @@ async function renderSelectedSatelliteImage(entry) {
   figure.hidden = false;
   image.onerror = null;
   image.removeAttribute('src');
+  caption.replaceChildren();
   caption.textContent = 'Looking for a public satellite image…';
   try {
-    const searches = [`${entry.name || 'satellite'} satellite spacecraft`, entry.name || 'satellite'];
-    let page = null;
+    const name = String(entry.name || '').replace(/[()\[\]]/g, ' ').trim();
+    const searches = [`"${name}" satellite`, `"${name}"`];
+    const stopWords = new Set(['satellite', 'spacecraft', 'space', 'vehicle', 'the', 'and', 'of', 'for', 'mission', 'object']);
+    const identityTokens = name.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+      .split(/[^a-z0-9]+/).filter(token => !stopWords.has(token) && (token.length >= 4 || /[0-9]/.test(token)));
+    const rejected = /\b(news|article|newspaper|logo|icon|diagram|infographic|screenshot|artist.?s impression|artist.?s concept|rendering|illustration|poster|press release)\b/i;
+    const candidates = [];
     for (const search of searches) {
-      const url = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(search)}&gsrnamespace=6&gsrlimit=8&prop=imageinfo&iiprop=url&iiurlwidth=960&format=json&origin=*`;
+      if (!name) break;
+      const url = `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(search)}&gsrnamespace=6&gsrlimit=8&prop=info|imageinfo&inprop=url&iiprop=url|mime|extmetadata&iiurlwidth=960&format=json&origin=*`;
       const response = await fetch(url);
       if (!response.ok) continue;
       const data = await response.json();
-      page = Object.values(data.query?.pages || {}).find(candidate => candidate.imageinfo?.[0]?.thumburl || candidate.imageinfo?.[0]?.url);
-      if (page) break;
+      for (const page of Object.values(data.query?.pages || {})) {
+        const info = page.imageinfo?.[0];
+        if (!info || !/^image\/(jpeg|png|webp)$/i.test(info.mime || '')) continue;
+        const title = String(page.title || '').replace(/^File:/i, '');
+        const identity = `${title} ${info.extmetadata?.ImageDescription?.value || ''}`
+          .replace(/<[^>]*>/g, ' ').replace(/&(?:amp|quot|lt|gt|#39);/g, ' ').toLowerCase();
+        if (rejected.test(`${title} ${identity}`)) continue;
+        const normalizedIdentity = identity.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ');
+        const norad = String(entry.norad_id);
+        const matched = identityTokens.filter(token => normalizedIdentity.includes(token)).length;
+        const idMatch = new RegExp(`(?:^|\\D)${norad}(?:\\D|$)`).test(normalizedIdentity);
+        // Require the NORAD ID or every distinctive name token. If Commons
+        // cannot establish that link, show the placeholder instead of guessing.
+        if (!idMatch && (!identityTokens.length || matched !== identityTokens.length)) continue;
+        candidates.push({ page, info, score: (idMatch ? 100 : 0) + matched * 10 + (title.toLowerCase().includes(name.toLowerCase()) ? 5 : 0) });
+      }
     }
-    const source = page?.imageinfo?.[0]?.thumburl || page?.imageinfo?.[0]?.url;
-    if (!source) throw new Error('No public image found');
-    image.alt = `${entry.name || 'Satellite'} (image: ${page.title || 'Wikimedia Commons'})`;
+    if (imageLookupNorad !== entry.norad_id) return;
+    candidates.sort((a, b) => b.score - a.score);
+    const match = candidates[0];
+    const page = match?.page;
+    const info = match?.info;
+    const source = info?.thumburl || info?.url;
+    if (!source || !page?.fullurl?.startsWith('https://commons.wikimedia.org/wiki/File:')) throw new Error('No verified public image found');
+    image.alt = `${entry.name || 'Satellite'} (photograph from Wikimedia Commons)`;
     image.src = source;
-    caption.textContent = `${(page.title || 'Satellite image').replace(/^File:/, '')} · Wikimedia Commons`;
-    image.onerror = showSatelliteImagePlaceholder;
+    caption.replaceChildren();
+    const title = document.createTextNode(`${(page.title || 'Satellite image').replace(/^File:/, '')} · `);
+    const sourceLink = document.createElement('a');
+    sourceLink.href = page.fullurl;
+    sourceLink.target = '_blank';
+    sourceLink.rel = 'noopener noreferrer';
+    sourceLink.textContent = 'Wikimedia Commons · source and license';
+    caption.append(title, sourceLink);
+    image.onerror = () => {
+      if (imageLookupNorad === entry.norad_id) showSatelliteImagePlaceholder();
+    };
   } catch (_) {
+    if (imageLookupNorad !== entry.norad_id) return;
     showSatelliteImagePlaceholder();
   }
 }

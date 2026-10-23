@@ -20,6 +20,8 @@ from .config import (
     CELESTRAK_GP_GROUPS,
     KEEPTRACK_API_KEY,
     KEEPTRACK_BASE_URL,
+    SATCAT_URL,
+    SATCAT_CACHE_TTL_SECONDS,
 )
 from .schemas import CatalogEntry, CatalogError
 from .tle_service import _read_cache, _write_cache, fetch_group
@@ -266,12 +268,33 @@ def _merge_satcat(entry: CatalogEntry, meta: Optional[Dict[str, Any]]) -> None:
         entry.rcs_m2 = _safe_float(meta.get("RCS"))
 
 
-def _fetch_satcat() -> Dict[int, Dict[str, Any]]:
-    """Load SATCAT enrichment from the runtime cache or bundled public snapshot."""
-    cached = _read_cache("satcat_all_v1")
+def _fetch_satcat(refresh_upstream: bool = True) -> Dict[int, Dict[str, Any]]:
+    """Load cached SATCAT data, refreshing it from CelesTrak at most daily."""
+    cached = _read_cache("satcat_all_v2")
     data = (cached or {}).get("data", {})
-    if isinstance(data, dict) and data:
-        return {_safe_int(key): value for key, value in data.items() if _safe_int(key) is not None}
+    if isinstance(data, dict) and data and _is_fresh_ttl(cached, SATCAT_CACHE_TTL_SECONDS):
+        return {_safe_int(key): value for key, value in data.items() if _safe_int(key) is not None and isinstance(value, dict)}
+
+    # Keep a usable stale cache if the upstream catalog is temporarily unavailable.
+    stale_data = data if isinstance(data, dict) else {}
+    if refresh_upstream:
+        try:
+            response = requests.get(SATCAT_URL, headers=REQUEST_HEADERS, timeout=(8, 30))
+            response.raise_for_status()
+            rows = response.json()
+            if isinstance(rows, list):
+                refreshed = {
+                    norad: row for row in rows if isinstance(row, dict)
+                    and (norad := _safe_int(row.get("NORAD_CAT_ID") or row.get("norad_id"))) is not None
+                }
+                if refreshed:
+                    _write_cache("satcat_all_v2", {str(key): value for key, value in refreshed.items()})
+                    return refreshed
+            logger.warning("CelesTrak SATCAT returned no usable records")
+        except (requests.RequestException, ValueError, TypeError) as exc:
+            logger.warning("CelesTrak SATCAT refresh failed; using available metadata: %s", exc)
+    if stale_data:
+        return {_safe_int(key): value for key, value in stale_data.items() if _safe_int(key) is not None and isinstance(value, dict)}
     try:
         from pathlib import Path
         snapshot_path = Path(__file__).parent / "data" / "satcat_metadata.json"
@@ -354,8 +377,8 @@ def _entry_to_compact(entry: CatalogEntry) -> Dict[str, Any]:
         "ra_of_asc_node_deg": _safe_float(entry.omm.get("RA_OF_ASC_NODE")) if entry.omm else None,
         "epoch": _safe_float(entry.omm.get("EPOCH")) if entry.omm else None,
         # SATCAT fields
-        "apogee_km": _safe_float(entry.omm.get("APOGEE")) if entry.omm else None,
-        "perigee_km": _safe_float(entry.omm.get("PERIGEE")) if entry.omm else None,
+        "apogee_km": entry.apogee_km,
+        "perigee_km": entry.perigee_km,
     }
 
 
@@ -470,7 +493,7 @@ def build_catalog(
     # 3. SATCAT enrichment for all merged NORAD IDs
     # SATCAT is optional enrichment and can be a large request. Use a warmed
     # cache only so metadata lookup never delays the first catalog response.
-    satcat = _fetch_satcat()
+    satcat = _fetch_satcat(refresh_upstream=include_upstream)
     for entry in items.values():
         _merge_satcat(entry, satcat.get(entry.norad_id))
         entry.category = _category(entry)
@@ -510,7 +533,7 @@ def _refresh_catalog_cache() -> None:
         if not data.get("objects"):
             raise CatalogError("Upstream providers returned an empty satellite catalog")
         data.setdefault("source", ", ".join(data.get("sources", [])) or "celestrak")
-        _write_cache("catalog_v3", data)
+        _write_cache("catalog_v4", data)
     except Exception:
         logger.exception("Background catalog refresh failed; retaining cached snapshot")
     finally:
@@ -532,8 +555,8 @@ def _start_background_refresh() -> None:
 
 
 def get_catalog(force_refresh: bool = False) -> Dict[str, Any]:
-    # v3 invalidates partial catalogs cached before snapshot top-up was applied.
-    cache_key = "catalog_v3"
+    # v4 includes the refreshed SATCAT metadata fields in compact entries.
+    cache_key = "catalog_v4"
     cached = _read_cache(cache_key)
     cached_data = cached.get("data", {}) if isinstance(cached, dict) else {}
     if not isinstance(cached_data, dict):

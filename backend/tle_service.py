@@ -136,7 +136,7 @@ def fetch_satellite_by_norad(norad_id: int) -> Dict[str, Any]:
     # The catalog already contains the same current OMM data used to plot the
     # selected object. Reuse it for info/position requests instead of making a
     # second CelesTrak round trip for every click in the search list.
-    catalog_cache = _read_cache("catalog_v3")
+    catalog_cache = _read_cache("catalog_v4")
     catalog_data = (catalog_cache or {}).get("data", {})
     if catalog_cache and _is_fresh(catalog_cache) and isinstance(catalog_data, dict):
         for entry in catalog_data.get("objects", []):
