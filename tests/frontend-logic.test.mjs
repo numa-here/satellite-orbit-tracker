@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
 import { createRequire } from 'node:module';
-import { adjacentSatelliteEntry, filterSatelliteEntries, geodeticToGlobePoint, nearestSatellitePoint } from '../frontend/js/satellite-utils.mjs';
+import { adjacentSatelliteEntry, createSatelliteMarker, filterSatelliteEntries, geodeticToGlobePoint, nearestSatellitePoint } from '../frontend/js/satellite-utils.mjs';
 
 const require = createRequire(import.meta.url);
 const satelliteJs = require('../frontend/vendor/satellite.min.js');
@@ -43,6 +43,17 @@ test('geodetic coordinates map directly to globe coordinates with altitude scale
   assert.equal(geodeticToGlobePoint(91, 0, 400), null);
   assert.equal(geodeticToGlobePoint(0, 181, 400), null);
   assert.equal(geodeticToGlobePoint(0, 0, -1), null);
+});
+
+test('valid worker coordinates become visible globe markers with scaled altitude and stable identity', () => {
+  const entry = { norad_id: 25544, name: 'ISS', category: 'crewed' };
+  const marker = createSatelliteMarker(entry, 12.5, -43.25, 420, 0.18);
+  assert.deepEqual(marker, {
+    norad_id: 25544, lat: 12.5, lng: -43.25, altitude: 420 / 6371,
+    radius: 0.28, entry,
+  });
+  assert.equal(createSatelliteMarker({ norad_id: 'bad' }, 0, 0, 400, 0.3), null);
+  assert.equal(createSatelliteMarker(entry, NaN, 0, 400, 0.3), null);
 });
 
 test('marker picking selects the nearest visible satellite within the click tolerance', () => {
@@ -180,4 +191,45 @@ test('worker propagates a 1000-object bundled catalog sample off the UI thread',
   assert.ok(validCount > 900);
   assert.equal(positions.valid.length, 1000);
   console.log(`Worker sample: ${ready.count}/1000 satrecs, ${validCount} positions; init ${initMs.toFixed(1)} ms, compute ${computeMs.toFixed(1)} ms`);
+});
+
+test('full bundled catalog produces only finite, renderable satellite positions', () => {
+  const source = readFileSync(new URL('../frontend/js/workers/satellite-worker.js', import.meta.url), 'utf8');
+  const rows = JSON.parse(readFileSync(new URL('../backend/data/active_omm_snapshot.json', import.meta.url), 'utf8'));
+  const catalog = rows.map(row => ({
+    norad_id: Number(row.NORAD_CAT_ID), name: row.OBJECT_NAME, category: 'payload', omm: row,
+  }));
+  const messages = [];
+  let onMessage;
+  const context = {
+    satellite: satelliteJs, Date, importScripts: () => {}, setTimeout: callback => callback(),
+    console: { warn: () => {} },
+    self: {
+      addEventListener: (_type, listener) => { onMessage = listener; },
+      postMessage: message => messages.push(message),
+    },
+  };
+  vm.runInNewContext(source, context);
+  const time = Date.UTC(2026, 9, 23, 12);
+  onMessage({ data: { type: 'INIT', catalog } });
+  onMessage({ data: { type: 'COMPUTE', time } });
+  const ready = messages.find(message => message.type === 'READY');
+  const positions = messages.find(message => message.type === 'POSITIONS');
+  const validCount = positions.valid.reduce((sum, value) => sum + value, 0);
+
+  assert.ok(rows.length >= 5000, `expected a full bundled snapshot, found ${rows.length} records`);
+  assert.equal(positions.positions.length, catalog.length * 3);
+  assert.equal(positions.valid.length, catalog.length);
+  assert.ok(validCount >= Math.floor(catalog.length * 0.95),
+    `expected at least 95% of bundled records to propagate, found ${validCount}/${catalog.length}`);
+  for (let i = 0; i < positions.valid.length; i++) {
+    if (!positions.valid[i]) continue;
+    const lat = positions.positions[i * 3];
+    const lng = positions.positions[i * 3 + 1];
+    const altitudeKm = positions.positions[i * 3 + 2];
+    assert.ok(Number.isFinite(lat) && lat >= -90 && lat <= 90);
+    assert.ok(Number.isFinite(lng) && lng >= -180 && lng <= 180);
+    assert.ok(Number.isFinite(altitudeKm) && altitudeKm >= 0);
+  }
+  console.log(`Full catalog: ${catalog.length} entries, ${ready.count} usable orbital records, ${validCount} valid positions`);
 });

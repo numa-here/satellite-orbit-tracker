@@ -10,6 +10,20 @@ export function geodeticToGlobePoint(latitude, longitude, altitudeKm) {
   return { lat, lng, altitude: altitude / EARTH_RADIUS_KM };
 }
 
+export function createSatelliteMarker(entry, latitude, longitude, altitudeKm, radius) {
+  const noradId = Number(entry?.norad_id);
+  const position = geodeticToGlobePoint(latitude, longitude, altitudeKm);
+  if (!entry || !Number.isSafeInteger(noradId) || noradId <= 0 || !position) return null;
+  const visibleRadius = Number.isFinite(Number(radius))
+    ? Math.max(0.28, Math.min(0.44, Number(radius))) : 0.34;
+  return {
+    norad_id: noradId,
+    ...position,
+    radius: visibleRadius,
+    entry,
+  };
+}
+
 function asSet(value) {
   if (value instanceof Set) return value;
   if (Array.isArray(value)) return new Set(value);

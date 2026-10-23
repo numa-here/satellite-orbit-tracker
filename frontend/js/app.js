@@ -11,9 +11,9 @@ import {
   setSatellitesVisible, setEarthVisible,
   setOrbitsVisible,
   zoomIn, zoomOut, resetCameraView, previousSatellite, nextSatellite,
-} from './globe.js?v=orbit-fix-20261023-4';
+} from './globe.js?v=orbit-fix-20261024-1';
 
-import { initCatalogUI, setCatalog as catalogSetCatalog, getFilteredEntries, setSelectedNorad, setHoveredNorad } from './catalog-ui.js?v=orbit-fix-20261023-4';
+import { initCatalogUI, setCatalog as catalogSetCatalog, getFilteredEntries, setSelectedNorad, setHoveredNorad } from './catalog-ui.js?v=orbit-fix-20261024-1';
 
 // --- State -----------------------------------------------------------------
 

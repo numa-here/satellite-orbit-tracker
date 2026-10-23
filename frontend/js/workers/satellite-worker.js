@@ -114,9 +114,19 @@ function computeSelectedOrbit(noradId, timeMs) {
   for (let i = 0; i <= 180; i++) {
     const date = new Date(Number(timeMs) + periodMinutes * 60000 * i / 180);
     const result = satellite.propagate(satrec, date);
-    if (!result?.position) continue;
+    if (!result?.position) {
+      if (segment.length > 1) paths.push({ norad_id: entry.norad_id, name: entry.name, points: segment });
+      segment = [];
+      previousLongitude = null;
+      continue;
+    }
     const geo = satellite.eciToGeodetic(result.position, satellite.gstime(date));
-    if (!geo || !Number.isFinite(geo.height)) continue;
+    if (!geo || !Number.isFinite(geo.height) || !Number.isFinite(geo.latitude) || !Number.isFinite(geo.longitude)) {
+      if (segment.length > 1) paths.push({ norad_id: entry.norad_id, name: entry.name, points: segment });
+      segment = [];
+      previousLongitude = null;
+      continue;
+    }
     const longitude = satellite.degreesLong(geo.longitude);
     if (previousLongitude !== null && Math.abs(longitude - previousLongitude) > 180) {
       if (segment.length > 1) paths.push({ norad_id: entry.norad_id, name: entry.name, points: segment });
@@ -182,9 +192,9 @@ function propagatePosition(satrec, date, entry) {
 /** Category → point size. */
 function pointSize(category) {
   const base = {
-    crewed: 0.38, rocket_body: 0.28, debris: 0.18,
-    constellation: 0.24, gnss: 0.3, weather: 0.3,
-    payload: 0.24, unknown: 0.22,
+    crewed: 0.44, rocket_body: 0.36, debris: 0.28,
+    constellation: 0.34, gnss: 0.4, weather: 0.4,
+    payload: 0.34, unknown: 0.32,
   };
   return base[category] || base.unknown;
 }

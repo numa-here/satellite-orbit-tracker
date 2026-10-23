@@ -17,7 +17,7 @@
  *   getSelectedNorad() / getHoveredNorad()
  */
 
-import { filterSatelliteEntries } from './satellite-utils.mjs?v=orbit-fix-20261023-4';
+import { filterSatelliteEntries } from './satellite-utils.mjs?v=orbit-fix-20261024-1';
 
 const DEFAULT_DEBOUNCE_MS = 150;
 

@@ -97,7 +97,9 @@ html, body {
   background-size: 197px 181px, 251px 223px, 307px 269px, 359px 313px;
 }
 
-#globe-container.earth-fallback-overlay::before { z-index: 3; }
+/* Keep the CSS Earth fallback beneath the WebGL canvas. Raising this layer
+   above the scene hides every satellite marker while the texture is loading. */
+#globe-container.earth-fallback-overlay::before { z-index: 0; }
 
 @keyframes earth-texture-rotation {
   from { background-position: center, center, 0% center; }
