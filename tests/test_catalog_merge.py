@@ -151,6 +151,25 @@ def test_cold_catalog_uses_bundled_snapshot_without_calling_upstreams(monkeypatc
     assert 900 in {entry["norad_id"] for entry in data["objects"]}
 
 
+def test_catalog_cache_writer_receives_catalog_payload_not_an_extra_envelope(monkeypatch):
+    from backend import catalog_service
+
+    catalog_payload = {"objects": [{"norad_id": 25544}], "count": 1, "sources": ["snapshot"]}
+    writes = []
+    monkeypatch.setattr(catalog_service, "_read_cache", lambda key: None)
+    monkeypatch.setattr(catalog_service, "_write_cache", lambda key, payload: writes.append((key, payload)))
+    monkeypatch.setattr(catalog_service, "_start_background_refresh", lambda: None)
+    monkeypatch.setattr(catalog_service, "build_catalog", lambda **kwargs: dict(catalog_payload))
+
+    result = catalog_service.get_catalog()
+
+    assert result["objects"] == catalog_payload["objects"]
+    assert writes[0][0] == "catalog_v3"
+    assert writes[0][1]["objects"] == catalog_payload["objects"]
+    assert "timestamp" not in writes[0][1]
+    assert "data" not in writes[0][1]
+
+
 def test_empty_upstream_and_empty_cache_fall_back_to_omm_seed(monkeypatch):
     from backend import catalog_service
 

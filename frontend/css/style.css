@@ -56,33 +56,7 @@ html, body {
   background-size: 173px 151px, 223px 197px, 269px 239px, 311px 283px, 383px 337px;
 }
 
-/* Textured Earth safety layer behind WebGL, so the map remains visible if
-   a browser cannot draw the renderer's sphere texture. */
-#globe-container::before {
-  content: "";
-  position: absolute;
-  z-index: 0;
-  left: 50%;
-  top: 50%;
-  width: min(46vw, 64vh, 520px);
-  min-width: 240px;
-  aspect-ratio: 1;
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  background-image:
-    radial-gradient(circle at 50% 50%, transparent 54%, rgba(0, 4, 12, .68) 100%),
-    radial-gradient(ellipse at 28% 24%, rgba(255,255,255,.15), transparent 43%),
-    url('/vendor/earth-blue-marble.jpg');
-  background-size: 100% 100%, 100% 100%, auto 100%;
-  background-position: center, center, 0% center;
-  background-repeat: no-repeat;
-  box-shadow: 0 0 36px rgba(54, 161, 255, .25), inset -24px -8px 34px rgba(0,0,0,.55);
-  animation: earth-texture-rotation 180s linear infinite;
-  pointer-events: none;
-}
-
-/* Keep a deep-space starfield visible even when a WebGL implementation clears
-   its canvas opaquely instead of honoring the transparent renderer setting. */
+/* Keep a deep-space starfield around the WebGL globe. */
 #globe-container::after {
   content: "";
   position: absolute;
@@ -97,24 +71,10 @@ html, body {
   background-size: 197px 181px, 251px 223px, 307px 269px, 359px 313px;
 }
 
-/* Keep the CSS Earth fallback beneath the WebGL canvas. Raising this layer
-   above the scene hides every satellite marker while the texture is loading. */
-#globe-container.earth-fallback-overlay::before { z-index: 0; }
-
-@keyframes earth-texture-rotation {
-  from { background-position: center, center, 0% center; }
-  to { background-position: center, center, 100% center; }
-}
-
 #globe-container .scene-container {
   position: relative;
   z-index: 1;
-  /* Black clears blend away so the bundled Earth remains visible even on
-     WebGL builds that ignore the renderer's transparent-clear setting. */
-  mix-blend-mode: screen;
 }
-
-#globe-container.earth-hidden::before { display: none; }
 
 /* --- Info panel (right side) -------------------------------------------- */
 #info-panel {

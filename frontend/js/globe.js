@@ -1,6 +1,6 @@
 /** 3D Earth and satellite catalog rendering. */
-import * as THREE from '../vendor/three.module.min.js?v=orbit-points-20261024-1';
-import { adjacentSatelliteEntry, createSatelliteMarker, filterSatelliteEntries, nearestSatellitePoint } from './satellite-utils.mjs?v=orbit-spikes-20261024-1';
+import * as THREE from '../vendor/three.module.min.js?v=orbit-points-20261024-2';
+import { adjacentSatelliteEntry, createSatelliteMarker, filterSatelliteEntries, nearestSatellitePoint } from './satellite-utils.mjs?v=orbit-points-20261024-2';
 
 let globe = null;
 let worker = null;
@@ -20,6 +20,7 @@ let visibilityAttribute = null;
 let validPositions = new Uint8Array(0);
 let baseSizes = new Float32Array(0);
 let pointIndices = new Map();
+let pointSampleDiagnosticsLogged = false;
 let activeFilters = {};
 let activeSearch = '';
 let selectedNorad = null;
@@ -103,29 +104,11 @@ export function initGlobe(containerId) {
     renderer.domElement.style.background = 'transparent';
     globe.scene().background = null;
 
-    // Keep the Earth sphere visible if the texture request fails. Once the
-    // texture loads, globe.gl applies it over this fallback material color.
+    // Keep the actual globe sphere visible while its bundled texture loads.
     const globeMaterial = globe.globeMaterial();
     if (globeMaterial?.color?.set) globeMaterial.color.set('#315b78');
 
     createSatellitePointLayer();
-
-    // Some hosted/headless WebGL builds report a ready globe but never paint
-    // the Earth texture. Put the bundled textured Earth above that empty
-    // canvas until a real texture image is available.
-    let textureChecks = 0;
-    const checkEarthTexture = () => {
-      if (!globe) return;
-      const image = globe.globeMaterial()?.map?.image;
-      if (image?.complete && image.naturalWidth > 0) {
-        container.classList.remove('earth-fallback-overlay');
-        return;
-      }
-      container.classList.add('earth-fallback-overlay');
-      textureChecks += 1;
-      if (textureChecks < 12) window.setTimeout(checkEarthTexture, 1000);
-    };
-    window.setTimeout(checkEarthTexture, 1200);
 
     window.globe = globe;
     const canvas = renderer.domElement;
@@ -188,7 +171,7 @@ export function initGlobe(containerId) {
   }
 
   try {
-    worker = new Worker('/js/workers/satellite-worker.js?v=orbit-spikes-20261024-1');
+    worker = new Worker('/js/workers/satellite-worker.js?v=orbit-points-20261024-2');
     worker.onmessage = event => {
       if (event.data.type === 'INIT_PROGRESS') {
         showGlobeStatus(`Preparing satellite elements ${event.data.processed.toLocaleString()} / ${event.data.total.toLocaleString()}…`);
@@ -326,6 +309,7 @@ function renderPositions(data) {
     return;
   }
   const points = [];
+  const pointSampleDiagnostics = [];
   const positions = positionAttribute?.array;
   if (!positions || !globe) return;
   validPositions.fill(0);
@@ -337,13 +321,31 @@ function renderPositions(data) {
     if (!point) continue;
     const index = pointIndices.get(Number(point.norad_id));
     if (index == null) continue;
-    const coords = globe.getCoords(point.lat, point.lng, point.altitude);
+    const altitudeRatio = point.altitude; // createSatelliteMarker converts km to altitudeKm / 6371.
+    const coords = globe.getCoords(point.lat, point.lng, altitudeRatio);
     if (!coords || ![coords.x, coords.y, coords.z].every(Number.isFinite)) continue;
     positions[index * 3] = coords.x;
     positions[index * 3 + 1] = coords.y;
     positions[index * 3 + 2] = coords.z;
     validPositions[index] = 1;
     points.push(point);
+    if (!pointSampleDiagnosticsLogged && points.length <= 3) {
+      const distanceFromOrigin = Math.hypot(coords.x, coords.y, coords.z);
+      const globeRadius = globe.getGlobeRadius?.() || 100;
+      pointSampleDiagnostics.push({
+        norad_id: point.norad_id,
+        latitude: point.lat,
+        longitude: point.lng,
+        altitudeKm: data.positions[i * 3 + 2],
+        altitudeRatio,
+        distanceFromOrigin,
+        expectedDistance: globeRadius * (1 + altitudeRatio),
+      });
+    }
+  }
+  if (!pointSampleDiagnosticsLogged && pointSampleDiagnostics.length === 3) {
+    console.info('[globe.js] Satellite point position samples (globe-radius units):', pointSampleDiagnostics);
+    pointSampleDiagnosticsLogged = true;
   }
   positionAttribute.needsUpdate = true;
   propagatedPoints = points;

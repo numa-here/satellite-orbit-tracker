@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Satellite Orbit Tracker</title>
-  <link rel="stylesheet" href="/css/style.css?v=orbit-fix-20261024-1" />
+  <link rel="stylesheet" href="/css/style.css?v=orbit-points-20261024-2" />
 </head>
 <body>
 
@@ -247,23 +247,34 @@
     </div>
   </div>
 
-  <!-- Load one shared Three.js module before globe.gl and the point layer. -->
-  <script type="module">
-    import * as THREE from '/vendor/three.module.min.js?v=orbit-points-20261024-1';
-    window.THREE = THREE;
-    const loadClassicScript = src => new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = src;
-      script.onload = resolve;
-      script.onerror = reject;
-      document.head.appendChild(script);
+  <!-- Load classic globals in document order, then start the ES module app. -->
+  <script src="/vendor/globe.gl.min.js?v=orbit-globe-20261023-70"></script>
+  <script src="/vendor/chart.umd.js?v=orbit-globe-20261023-70"></script>
+  <script src="/vendor/satellite.min.js?v=orbit-globe-20261023-70"></script>
+  <script src="/js/api.js?v=orbit-globe-20261023-70"></script>
+  <script src="/js/panel.js?v=orbit-points-20261024-2"></script>
+  <script>
+    window.showTrackerStartupError = message => {
+      console.error('Satellite tracker startup failed:', message);
+      const notice = document.createElement('div');
+      notice.setAttribute('role', 'alert');
+      notice.textContent = `The tracker could not start: ${message}`;
+      Object.assign(notice.style, {
+        position: 'fixed', top: '16px', left: '50%', transform: 'translateX(-50%)',
+        zIndex: '10000', maxWidth: 'min(680px, 90vw)', padding: '12px 16px',
+        borderRadius: '8px', background: '#3b1720', color: '#fff',
+        font: '14px system-ui, sans-serif',
+      });
+      document.body.appendChild(notice);
+    };
+    window.addEventListener('error', event => {
+      if (event.message) window.showTrackerStartupError(event.message);
     });
-    await loadClassicScript('/vendor/globe.gl.min.js?v=orbit-globe-20261023-70');
-    await loadClassicScript('/vendor/chart.umd.js?v=orbit-globe-20261023-70');
-    await loadClassicScript('/vendor/satellite.min.js?v=orbit-globe-20261023-70');
-    await loadClassicScript('/js/api.js?v=orbit-globe-20261023-70');
-    await loadClassicScript('/js/panel.js?v=orbit-spikes-20261024-1');
-    await import('/js/app.js?v=orbit-spikes-20261024-1');
+    window.addEventListener('unhandledrejection', event => {
+      window.showTrackerStartupError(event.reason?.message || String(event.reason));
+    });
   </script>
+  <script type="module" src="/js/app.js?v=orbit-points-20261024-2"
+    onerror="window.showTrackerStartupError('The application module could not be loaded. Check the JavaScript assets and reload.');"></script>
 </body>
 </html>

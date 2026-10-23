@@ -11,9 +11,9 @@ import {
   setSatellitesVisible, setEarthVisible,
   setOrbitsVisible,
   zoomIn, zoomOut, resetCameraView, previousSatellite, nextSatellite,
-} from './globe.js?v=orbit-spikes-20261024-1';
+} from './globe.js?v=orbit-points-20261024-2';
 
-import { initCatalogUI, setCatalog as catalogSetCatalog, getFilteredEntries, setSelectedNorad, setHoveredNorad } from './catalog-ui.js?v=orbit-spikes-20261024-1';
+import { initCatalogUI, setCatalog as catalogSetCatalog, getFilteredEntries, setSelectedNorad, setHoveredNorad } from './catalog-ui.js?v=orbit-points-20261024-2';
 
 // --- State -----------------------------------------------------------------
 
@@ -55,7 +55,7 @@ window.globeApp = {
 // Initialisation
 // ===========================================================================
 
-document.addEventListener('DOMContentLoaded', async () => {
+async function initializeApp() {
   // 1. Create the 3D globe + Points layer
   initGlobe('globe-container');
   // Wire the floating controls before any network requests. A slow catalog
@@ -142,7 +142,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 // 10. Position polling is handled by the Web Worker via onmessage
   startPolling();
-});
+}
+
+// This module is dynamically imported after the vendor libraries are ready.
+// That import can finish after DOMContentLoaded, so initialize in either case.
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeApp, { once: true });
+} else {
+  void initializeApp();
+}
 
 // ==========================================================================
 // Event listeners
@@ -617,7 +625,7 @@ function initAltitudeChart() {
         borderColor: '#00d4ff',
         backgroundColor: '#00d4ff20',
         borderWidth: 1.5,
-        pointRadius: 0,
+        pointStyle: false,
         fill: true,
         tension: 0.3,
       }],

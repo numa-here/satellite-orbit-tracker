@@ -510,7 +510,7 @@ def _refresh_catalog_cache() -> None:
         if not data.get("objects"):
             raise CatalogError("Upstream providers returned an empty satellite catalog")
         data.setdefault("source", ", ".join(data.get("sources", [])) or "celestrak")
-        _write_cache("catalog_v3", {"timestamp": time.time(), "data": data})
+        _write_cache("catalog_v3", data)
     except Exception:
         logger.exception("Background catalog refresh failed; retaining cached snapshot")
     finally:
@@ -573,7 +573,7 @@ def get_catalog(force_refresh: bool = False) -> Dict[str, Any]:
         data = build_catalog(include_upstream=force_refresh)
         if not data.get("objects"):
             raise CatalogError("Upstream providers returned an empty satellite catalog")
-        _write_cache(cache_key, {"timestamp": time.time(), "data": data})
+        _write_cache(cache_key, data)
         if not force_refresh:
             _start_background_refresh()
         data["cached"] = False
