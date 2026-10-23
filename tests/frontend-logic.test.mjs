@@ -47,13 +47,13 @@ test('geodetic coordinates map directly to globe coordinates with altitude scale
 
 test('valid worker coordinates become visible globe markers with scaled altitude and stable identity', () => {
   const entry = { norad_id: 25544, name: 'ISS', category: 'crewed' };
-  const marker = createSatelliteMarker(entry, 12.5, -43.25, 420, 0.18);
+  const marker = createSatelliteMarker(entry, 12.5, -43.25, 420);
   assert.deepEqual(marker, {
     norad_id: 25544, lat: 12.5, lng: -43.25, altitude: 420 / 6371,
-    radius: 0.28, entry,
+    entry,
   });
-  assert.equal(createSatelliteMarker({ norad_id: 'bad' }, 0, 0, 400, 0.3), null);
-  assert.equal(createSatelliteMarker(entry, NaN, 0, 400, 0.3), null);
+  assert.equal(createSatelliteMarker({ norad_id: 'bad' }, 0, 0, 400), null);
+  assert.equal(createSatelliteMarker(entry, NaN, 0, 400), null);
 });
 
 test('marker picking selects the nearest visible satellite within the click tolerance', () => {

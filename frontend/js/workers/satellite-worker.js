@@ -8,7 +8,7 @@
  *   { type: 'SELECT', norad_id: number, time: number }
  *
  * Reply:
- *   { type: 'POSITIONS', positions: [latitude, longitude, altitudeKm...], sizes, valid }
+ *   { type: 'POSITIONS', positions: [latitude, longitude, altitudeKm...], valid }
  */
 
 importScripts('/vendor/satellite.min.js');
@@ -73,12 +73,10 @@ function initializeCatalogBatch(generation) {
     pendingSelection = null;
   }
 }
-
 function computePositions(timeMs) {
   const date = new Date(timeMs);
   const n = catalog.length;
   const positions = new Float32Array(n * 3);
-  const sizes = new Float32Array(n);
   const valid = new Uint8Array(n);
 
   for (let i = 0; i < n; i++) {
@@ -90,13 +88,12 @@ function computePositions(timeMs) {
     positions[i * 3] = result.latitude;
     positions[i * 3 + 1] = result.longitude;
     positions[i * 3 + 2] = result.altitudeKm;
-    sizes[i] = result.size;
     valid[i] = 1;
   }
 
   self.postMessage({
-    type: 'POSITIONS', positions, sizes, valid,
-  }, [positions.buffer, sizes.buffer, valid.buffer]);
+    type: 'POSITIONS', positions, valid,
+  }, [positions.buffer, valid.buffer]);
 }
 
 // A selected orbit uses 180 propagation samples across one full period.
@@ -181,20 +178,8 @@ function propagatePosition(satrec, date, entry) {
     const longitude = satellite.degreesLong(gd.longitude);
     const altitudeKm = gd.height;
     if (![latitude, longitude, altitudeKm].every(Number.isFinite) || altitudeKm < 0) return null;
-    const size = pointSize(entry.category || 'unknown');
-
-    return { latitude, longitude, altitudeKm, size };
+    return { latitude, longitude, altitudeKm };
   } catch (err) {
     return null;
   }
-}
-
-/** Category → point size. */
-function pointSize(category) {
-  const base = {
-    crewed: 0.44, rocket_body: 0.36, debris: 0.28,
-    constellation: 0.34, gnss: 0.4, weather: 0.4,
-    payload: 0.34, unknown: 0.32,
-  };
-  return base[category] || base.unknown;
 }

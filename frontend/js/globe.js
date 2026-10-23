@@ -1,5 +1,6 @@
 /** 3D Earth and satellite catalog rendering. */
-import { adjacentSatelliteEntry, createSatelliteMarker, filterSatelliteEntries, nearestSatellitePoint } from './satellite-utils.mjs?v=orbit-fix-20261024-1';
+import * as THREE from '../vendor/three.module.min.js?v=orbit-points-20261024-1';
+import { adjacentSatelliteEntry, createSatelliteMarker, filterSatelliteEntries, nearestSatellitePoint } from './satellite-utils.mjs?v=orbit-spikes-20261024-1';
 
 let globe = null;
 let worker = null;
@@ -10,6 +11,15 @@ let visibleNoradIds = new Set();
 let propagatedPoints = [];
 let propagatedNoradIds = new Set();
 let pointGrid = new Map();
+let pointGeometry = null;
+let pointObject = null;
+let positionAttribute = null;
+let colorAttribute = null;
+let sizeAttribute = null;
+let visibilityAttribute = null;
+let validPositions = new Uint8Array(0);
+let baseSizes = new Float32Array(0);
+let pointIndices = new Map();
 let activeFilters = {};
 let activeSearch = '';
 let selectedNorad = null;
@@ -30,7 +40,32 @@ const DEFAULT_CAMERA_VIEW = { lat: 20, lng: 0, altitude: 2.2 };
 const PICK_GRID_DEGREES = 2;
 const MIN_CAMERA_ALTITUDE = 0.08;
 const MAX_CAMERA_ALTITUDE = 8.5;
-const SATELLITE_MARKER_COLOR = '#f4f8ff';
+const DEFAULT_MARKER_SIZE_PX = 2.2;
+const SELECTED_MARKER_SIZE_PX = 4.2;
+const POINT_VERTEX_SHADER = `
+  attribute vec3 color;
+  attribute float size;
+  attribute float visibility;
+  varying vec3 vColor;
+  varying float vVisibility;
+  void main() {
+    vColor = color;
+    vVisibility = visibility;
+    vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * viewPosition;
+    gl_PointSize = clamp(size * (320.0 / max(1.0, -viewPosition.z)), 1.3, 4.5);
+  }
+`;
+const POINT_FRAGMENT_SHADER = `
+  varying vec3 vColor;
+  varying float vVisibility;
+  void main() {
+    float radius = length(gl_PointCoord - vec2(0.5));
+    if (radius > 0.5) discard;
+    float alpha = 1.0 - smoothstep(0.28, 0.5, radius);
+    gl_FragColor = vec4(vColor, alpha * vVisibility);
+  }
+`;
 
 export function initGlobe(containerId) {
   const container = document.getElementById(containerId);
@@ -46,16 +81,6 @@ export function initGlobe(containerId) {
       .showAtmosphere(true)
       .atmosphereColor('#4da6ff')
       .atmosphereAltitude(0.15)
-      .pointsData([])
-      .pointLat(d => d.lat)
-      .pointLng(d => d.lng)
-      .pointAltitude(d => d.altitude)
-      .pointColor(d => Number(d.norad_id) === Number(selectedNorad) ? '#ffdf70' : SATELLITE_MARKER_COLOR)
-      .pointRadius(d => Number(d.norad_id) === Number(selectedNorad) ? 0.72 : d.radius)
-      .pointLabel(d => `${d.entry?.name || d.name || 'Satellite'} · NORAD ${d.norad_id || ''}`)
-      .pointResolution(6)
-      .pointsMerge(true)
-      .pointsTransitionDuration(0)
       .pathsData([])
       .pathPoints(d => d.points)
       .pathPointLat(d => d.lat)
@@ -82,6 +107,8 @@ export function initGlobe(containerId) {
     // texture loads, globe.gl applies it over this fallback material color.
     const globeMaterial = globe.globeMaterial();
     if (globeMaterial?.color?.set) globeMaterial.color.set('#315b78');
+
+    createSatellitePointLayer();
 
     // Some hosted/headless WebGL builds report a ready globe but never paint
     // the Earth texture. Put the bundled textured Earth above that empty
@@ -118,9 +145,8 @@ export function initGlobe(containerId) {
       hoveredNorad = null;
       window.globeApp?.onSatelliteHovered?.(null);
     });
-    // Merged points render efficiently, but globe.gl cannot ray-pick one
-    // point from the merged mesh. Resolve clicks with the same geographic
-    // grid used for hover, while ignoring drag gestures used to rotate Earth.
+    // Resolve point picking against the geographic grid while ignoring drag
+    // gestures used to rotate Earth.
     let pointerStart = null;
     canvas.addEventListener('pointerdown', event => {
       if (event.button !== 0) return;
@@ -162,7 +188,7 @@ export function initGlobe(containerId) {
   }
 
   try {
-    worker = new Worker('/js/workers/satellite-worker.js?v=orbit-fix-20261024-1');
+    worker = new Worker('/js/workers/satellite-worker.js?v=orbit-spikes-20261024-1');
     worker.onmessage = event => {
       if (event.data.type === 'INIT_PROGRESS') {
         showGlobeStatus(`Preparing satellite elements ${event.data.processed.toLocaleString()} / ${event.data.total.toLocaleString()}…`);
@@ -197,13 +223,75 @@ export function initGlobe(containerId) {
   startComputeTimer(3000);
 }
 
+function createSatellitePointLayer() {
+  pointGeometry = new THREE.BufferGeometry();
+  pointGeometry.setDrawRange(0, 0);
+  const material = new THREE.ShaderMaterial({
+    uniforms: {},
+    vertexShader: POINT_VERTEX_SHADER,
+    fragmentShader: POINT_FRAGMENT_SHADER,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  pointObject = new THREE.Points(pointGeometry, material);
+  pointObject.frustumCulled = false;
+  pointObject.renderOrder = 2;
+  globe.scene().add(pointObject);
+}
+
+function configureSatellitePointBuffers(entries) {
+  if (!pointGeometry) return;
+  const count = entries.length;
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  const sizes = new Float32Array(count);
+  const visibility = new Float32Array(count);
+  validPositions = new Uint8Array(count);
+  baseSizes = new Float32Array(count).fill(DEFAULT_MARKER_SIZE_PX);
+  pointIndices = new Map();
+  entries.forEach((entry, index) => {
+    pointIndices.set(Number(entry.norad_id), index);
+    colors.set([0.88, 0.93, 1], index * 3);
+    sizes[index] = DEFAULT_MARKER_SIZE_PX;
+  });
+  pointGeometry.dispose();
+  pointGeometry = new THREE.BufferGeometry();
+  const positionBuffer = new THREE.BufferAttribute(positions, 3);
+  positionBuffer.setUsage(THREE.DynamicDrawUsage);
+  colorAttribute = new THREE.BufferAttribute(colors, 3);
+  colorAttribute.setUsage(THREE.DynamicDrawUsage);
+  sizeAttribute = new THREE.BufferAttribute(sizes, 1);
+  sizeAttribute.setUsage(THREE.DynamicDrawUsage);
+  visibilityAttribute = new THREE.BufferAttribute(visibility, 1);
+  visibilityAttribute.setUsage(THREE.DynamicDrawUsage);
+  pointGeometry.setAttribute('position', positionBuffer);
+  pointGeometry.setAttribute('color', colorAttribute);
+  pointGeometry.setAttribute('size', sizeAttribute);
+  pointGeometry.setAttribute('visibility', visibilityAttribute);
+  pointGeometry.setDrawRange(0, count);
+  pointObject.geometry = pointGeometry;
+  positionAttribute = positionBuffer;
+}
+
+function setPointAppearance(noradId, selected) {
+  const index = pointIndices.get(Number(noradId));
+  if (index == null || !colorAttribute || !sizeAttribute) return;
+  colorAttribute.array.set(selected ? [1, 0.72, 0.22] : [0.88, 0.93, 1], index * 3);
+  sizeAttribute.array[index] = selected ? SELECTED_MARKER_SIZE_PX : baseSizes[index];
+  colorAttribute.needsUpdate = true;
+  sizeAttribute.needsUpdate = true;
+}
+
 export function setCatalog(entries) {
   catalogEntries = Array.isArray(entries) ? entries : [];
   propagatedPoints = [];
   propagatedNoradIds = new Set();
   pointGrid = new Map();
-  applyCatalogVisibility();
+  configureSatellitePointBuffers(catalogEntries);
   propagationEntries = catalogEntries;
+  if (selectedNorad != null) setPointAppearance(selectedNorad, true);
+  applyCatalogVisibility();
   startComputeTimer(3000);
   if (worker) {
     worker.postMessage({ type: 'INIT', catalog: propagationEntries.map(entry => ({
@@ -238,15 +326,26 @@ function renderPositions(data) {
     return;
   }
   const points = [];
+  const positions = positionAttribute?.array;
+  if (!positions || !globe) return;
+  validPositions.fill(0);
   for (let i = 0; i < propagationEntries.length; i++) {
     if (!data.valid[i]) continue;
     const point = createSatelliteMarker(propagationEntries[i],
       data.positions[i * 3], data.positions[i * 3 + 1], data.positions[i * 3 + 2],
-      data.sizes?.[i],
     );
     if (!point) continue;
+    const index = pointIndices.get(Number(point.norad_id));
+    if (index == null) continue;
+    const coords = globe.getCoords(point.lat, point.lng, point.altitude);
+    if (!coords || ![coords.x, coords.y, coords.z].every(Number.isFinite)) continue;
+    positions[index * 3] = coords.x;
+    positions[index * 3 + 1] = coords.y;
+    positions[index * 3 + 2] = coords.z;
+    validPositions[index] = 1;
     points.push(point);
   }
+  positionAttribute.needsUpdate = true;
   propagatedPoints = points;
   propagatedNoradIds = new Set(points.map(point => Number(point.norad_id)));
   pointGrid = buildPointGrid(points);
@@ -287,6 +386,7 @@ function applyCatalogVisibility() {
     window.globeApp?.onSatelliteHovered?.(null);
   }
   if (selectedNorad != null && !visibleEntries.some(entry => Number(entry.norad_id) === Number(selectedNorad))) {
+    setPointAppearance(selectedNorad, false);
     selectedNorad = null;
     selectedOrbitPaths = [];
     window.globeApp?.onSatelliteCleared?.();
@@ -297,7 +397,17 @@ function applyCatalogVisibility() {
 
 function applyPointVisibility() {
   const points = satellitesVisible ? propagatedPoints.filter(point => visibleNoradIds.has(Number(point.norad_id))) : [];
-  if (globe) globe.pointsData(points);
+  if (visibilityAttribute) {
+    const visibility = visibilityAttribute.array;
+    for (let i = 0; i < visibility.length; i++) {
+      const entry = propagationEntries[i];
+      const next = satellitesVisible && validPositions[i] && entry
+        && visibleNoradIds.has(Number(entry.norad_id)) ? 1 : 0;
+      if (visibility[i] !== next) visibility[i] = next;
+    }
+    visibilityAttribute.needsUpdate = true;
+  }
+  if (pointObject) pointObject.visible = satellitesVisible;
   if (propagatedPoints.length) {
     showGlobeStatus(`Displaying ${points.length.toLocaleString()} of ${propagatedPoints.length.toLocaleString()} valid satellite markers.`);
   }
@@ -349,7 +459,9 @@ function applyOrbitVisibility() {
 export function selectSatellite(noradId) {
   const entry = catalogEntries.find(item => Number(item.norad_id) === Number(noradId));
   if (!entry || !visibleEntries.includes(entry)) return;
+  if (selectedNorad != null) setPointAppearance(selectedNorad, false);
   selectedNorad = entry.norad_id;
+  setPointAppearance(selectedNorad, true);
   selectedOrbitPaths = [];
   if (worker) worker.postMessage({ type: 'SELECT', norad_id: selectedNorad, time: simulationTime });
   applyPointVisibility();
