@@ -81,7 +81,7 @@ def test_catalog_dedup_prioritizes_keeptrack(monkeypatch):
         keep_items=[KEEP_ENTRY],
         celestrak_groups={"stations": [CELESTRAK_DUPLICATE, CELESTRAK_UNIQUE]},
     )
-    data = catalog_service.get_catalog()
+    data = catalog_service.build_catalog()
     norads = [o["norad_id"] for o in data["objects"]]
     # Fresh upstream rows take precedence while the bundled snapshot fills
     # catalog coverage during the refresh window.
@@ -105,7 +105,7 @@ def test_catalog_missing_satcat_rows_remain_valid(monkeypatch):
         celestrak_groups={"active": [CELESTRAK_UNIQUE]},
         satcat={},
     )
-    data = catalog_service.get_catalog()
+    data = catalog_service.build_catalog()
     assert data["count"] >= 5000
     entry = next(item for item in data["objects"] if item["norad_id"] == 48274)
     assert entry["norad_id"] == 48274
@@ -128,6 +128,29 @@ def test_catalog_build_uses_large_omm_snapshot_when_upstreams_are_empty(monkeypa
     assert {25544, 41866}.issubset(norad_ids)  # ISS and GOES 16 remain searchable.
 
 
+def test_cold_catalog_uses_bundled_snapshot_without_calling_upstreams(monkeypatch):
+    from backend import catalog_service
+
+    monkeypatch.setattr(catalog_service, "_read_cache", lambda key: None)
+    monkeypatch.setattr(catalog_service, "_write_cache", lambda key, payload: None)
+    monkeypatch.setattr(catalog_service, "_start_background_refresh", lambda: None)
+    monkeypatch.setattr(
+        catalog_service, "_fetch_keeptrack_brief",
+        lambda: pytest.fail("Cold catalog must not wait on KeepTrack"),
+    )
+    monkeypatch.setattr(
+        catalog_service, "fetch_group",
+        lambda group: pytest.fail("Cold catalog must not wait on CelesTrak"),
+    )
+    monkeypatch.setattr(catalog_service, "_fetch_satcat", lambda: {})
+
+    data = catalog_service.get_catalog()
+
+    assert data["count"] >= 5000
+    assert data["stale"] is True
+    assert 900 in {entry["norad_id"] for entry in data["objects"]}
+
+
 def test_empty_upstream_and_empty_cache_fall_back_to_omm_seed(monkeypatch):
     from backend import catalog_service
 
@@ -137,7 +160,7 @@ def test_empty_upstream_and_empty_cache_fall_back_to_omm_seed(monkeypatch):
         lambda key: {"timestamp": 1, "data": {"objects": [], "count": 0}},
     )
     monkeypatch.setattr(catalog_service, "_is_fresh_ttl", lambda *args: True)
-    monkeypatch.setattr(catalog_service, "build_catalog", lambda: {"objects": [], "count": 0})
+    monkeypatch.setattr(catalog_service, "build_catalog", lambda **kwargs: {"objects": [], "count": 0})
     monkeypatch.setattr(catalog_service, "_write_cache", lambda key, payload: None)
 
     data = catalog_service.get_catalog()
@@ -188,6 +211,25 @@ def test_fetch_group_uses_retlector_mirror_when_celestrak_times_out(monkeypatch)
     assert result["provider"] == "retlector"
     assert result["data"][0]["NORAD_CAT_ID"] == 99999
     assert result["stale"] is False
+
+
+def test_single_satellite_lookup_uses_bundled_omm_before_network(monkeypatch):
+    from backend import tle_service
+
+    monkeypatch.setattr(tle_service, "_read_cache", lambda key: None)
+    monkeypatch.setattr(
+        tle_service.requests,
+        "get",
+        lambda *args, **kwargs: pytest.fail("Bundled NORAD 900 lookup must not wait for network"),
+    )
+
+    result = tle_service.fetch_satellite_by_norad(900)
+
+    assert result["data"]["NORAD_CAT_ID"] == 900
+    assert result["data"]["OBJECT_NAME"] == "CALSPHERE 1"
+    assert result["data"]["MEAN_MOTION"] > 0
+    assert result["stale"] is True
+    assert result["cached"] is True
 
 
 def test_catalog_endpoint_mocked():

@@ -21,6 +21,7 @@ backend/cache/
 
 # Testing
 .pytest_cache/
+.test-deps/
 htmlcov/
 .coverage
 

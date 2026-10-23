@@ -12,6 +12,7 @@ Supports:
 import json
 import logging
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -40,6 +41,28 @@ REQUEST_HEADERS = {
     ),
     "Accept": "application/json, text/plain, */*",
 }
+
+
+@lru_cache(maxsize=1)
+def _bundled_omm_by_norad() -> Dict[int, Dict[str, Any]]:
+    """Read the bundled real OMM snapshot once for fast offline lookups."""
+    snapshot_path = Path(__file__).parent / "data" / "active_omm_snapshot.json"
+    try:
+        with snapshot_path.open(encoding="utf-8") as snapshot_file:
+            rows = json.load(snapshot_file)
+    except (OSError, ValueError, TypeError) as exc:
+        logger.warning("Bundled OMM snapshot unavailable: %s", exc)
+        return {}
+    if not isinstance(rows, list):
+        return {}
+    return {
+        int(row["NORAD_CAT_ID"]): row
+        for row in rows
+        if isinstance(row, dict)
+        and str(row.get("NORAD_CAT_ID", "")).isdigit()
+        and int(row["NORAD_CAT_ID"]) > 0
+        and row.get("MEAN_MOTION") is not None
+    }
 
 
 def _get_cache_path(key: str) -> Path:
@@ -126,6 +149,13 @@ def fetch_satellite_by_norad(norad_id: int) -> Dict[str, Any]:
                 sat_data.setdefault("OBJECT_NAME", entry.get("name", "UNKNOWN"))
                 _write_cache(cache_key, sat_data)
                 return {"data": sat_data, "stale": bool(entry.get("stale")), "cached": True}
+
+    # Return bundled orbital elements immediately when hosted networking is
+    # unavailable. These are genuine OMMs used by the same SGP4 propagator as
+    # upstream data, and avoid serially waiting on two CelesTrak hosts.
+    bundled = _bundled_omm_by_norad().get(norad_id)
+    if bundled is not None:
+        return {"data": bundled, "stale": True, "cached": True}
 
     # Attempt network fetch across candidate endpoints (with 5s connect timeout)
     last_network_exc = None

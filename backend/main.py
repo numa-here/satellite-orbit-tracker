@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from .config import DEFAULT_SATELLITES, SATELLITE_GROUPS, KEEPTRACK_API_KEY
 from starlette.middleware.gzip import GZipMiddleware
@@ -100,7 +101,7 @@ async def get_catalog_endpoint(
     from CelesTrak SATCAT. Results are disk-cached and gzipped.
     """
     try:
-        data = get_catalog(force_refresh=refresh)
+        data = await run_in_threadpool(get_catalog, force_refresh=refresh)
     except CatalogError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     return data
@@ -126,7 +127,7 @@ async def get_satellite_position(
     Defaults to the International Space Station (NORAD 25544).
     """
     try:
-        tle_result = fetch_satellite_by_norad(sat)
+        tle_result = await run_in_threadpool(fetch_satellite_by_norad, sat)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except ConnectionError as exc:
@@ -181,7 +182,7 @@ async def get_satellite_track(
     The path is centered on current UTC time to provide historical + projected trajectory.
     """
     try:
-        tle_result = fetch_satellite_by_norad(sat)
+        tle_result = await run_in_threadpool(fetch_satellite_by_norad, sat)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except ConnectionError as exc:
@@ -222,7 +223,7 @@ async def get_satellite_elements(
     Parse and return Keplerian orbital elements from the latest TLE / OMM.
     """
     try:
-        tle_result = fetch_satellite_by_norad(sat)
+        tle_result = await run_in_threadpool(fetch_satellite_by_norad, sat)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except ConnectionError as exc:

@@ -7,6 +7,7 @@ cached /api/catalog payload.
 """
 import json
 import logging
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
@@ -24,6 +25,8 @@ from .schemas import CatalogEntry, CatalogError
 from .tle_service import _read_cache, _write_cache, fetch_group
 
 logger = logging.getLogger(__name__)
+_refresh_lock = threading.Lock()
+_refresh_in_progress = False
 
 REQUEST_HEADERS = {
     "User-Agent": (
@@ -356,12 +359,18 @@ def _entry_to_compact(entry: CatalogEntry) -> Dict[str, Any]:
     }
 
 
-def build_catalog(limit: Optional[int] = None, offset: int = 0) -> Dict[str, Any]:
+def build_catalog(
+    limit: Optional[int] = None,
+    offset: int = 0,
+    include_upstream: bool = True,
+) -> Dict[str, Any]:
     items: Dict[int, CatalogEntry] = {}
     sources: List[str] = []
 
     # 1. KeepTrack brief (priority source, key from backend env only)
-    keeptrack_items = _fetch_keeptrack_brief()
+    # Cold starts must be able to serve the bundled orbital data without
+    # waiting on external providers. Explicit refreshes still merge upstream.
+    keeptrack_items = _fetch_keeptrack_brief() if include_upstream else []
     if keeptrack_items:
         sources.append("keeptrack")
     for raw in keeptrack_items:
@@ -378,7 +387,7 @@ def build_catalog(limit: Optional[int] = None, offset: int = 0) -> Dict[str, Any
     # constellation and debris coverage. Run all group requests concurrently
     # so an unreachable provider costs one bounded timeout window, not one per
     # group.
-    groups_to_fetch = CELESTRAK_GP_GROUPS
+    groups_to_fetch = CELESTRAK_GP_GROUPS if include_upstream else []
     with ThreadPoolExecutor(max_workers=max(1, len(groups_to_fetch))) as pool:
         futures = {pool.submit(fetch_group, group): group for group in groups_to_fetch}
         for future in as_completed(futures):
@@ -493,6 +502,35 @@ def build_catalog(limit: Optional[int] = None, offset: int = 0) -> Dict[str, Any
     }
 
 
+def _refresh_catalog_cache() -> None:
+    """Refresh cache in the background after a fast snapshot/stale response."""
+    global _refresh_in_progress
+    try:
+        data = build_catalog(include_upstream=True)
+        if not data.get("objects"):
+            raise CatalogError("Upstream providers returned an empty satellite catalog")
+        data.setdefault("source", ", ".join(data.get("sources", [])) or "celestrak")
+        _write_cache("catalog_v3", {"timestamp": time.time(), "data": data})
+    except Exception:
+        logger.exception("Background catalog refresh failed; retaining cached snapshot")
+    finally:
+        with _refresh_lock:
+            _refresh_in_progress = False
+
+
+def _start_background_refresh() -> None:
+    global _refresh_in_progress
+    with _refresh_lock:
+        if _refresh_in_progress:
+            return
+        _refresh_in_progress = True
+    threading.Thread(
+        target=_refresh_catalog_cache,
+        name="catalog-refresh",
+        daemon=True,
+    ).start()
+
+
 def get_catalog(force_refresh: bool = False) -> Dict[str, Any]:
     # v3 invalidates partial catalogs cached before snapshot top-up was applied.
     cache_key = "catalog_v3"
@@ -518,11 +556,26 @@ def get_catalog(force_refresh: bool = False) -> Dict[str, Any]:
             data["source"] = "cache"
         return data
 
+    # When a cache exists but has expired, keep serving it while a single
+    # background refresh runs. This avoids making the UI wait on remote feeds.
+    if not force_refresh and has_cached_objects:
+        data = dict(cached_data)
+        data["cached"] = True
+        data["stale"] = True
+        data.setdefault("source", cached.get("source", "cache"))
+        _start_background_refresh()
+        return data
+
     try:
-        data = build_catalog()
+        # A cold cache returns the bundled OMM snapshot immediately. Then
+        # refresh upstream feeds asynchronously so newer data is cached for
+        # the next request without holding up Render startup traffic.
+        data = build_catalog(include_upstream=force_refresh)
         if not data.get("objects"):
             raise CatalogError("Upstream providers returned an empty satellite catalog")
         _write_cache(cache_key, {"timestamp": time.time(), "data": data})
+        if not force_refresh:
+            _start_background_refresh()
         data["cached"] = False
         data["stale"] = bool(data.get("stale"))
         # Ensure source field is set
